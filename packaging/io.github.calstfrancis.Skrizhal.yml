@@ -34,24 +34,31 @@ modules:
         path: ../Cargo.toml
       - type: file
         path: ../Cargo.lock
+      - type: file
+        path: ../core/Cargo.toml
+        dest: core
       - cargo-sources.json
     build-commands:
       # Copy vendor sources to a stable /app/ path so Module 2 uses the same path
       # in cargo fingerprints (fingerprints are path-sensitive for vendor sources).
       - cp -r cargo/vendor /app/skrizhal-cargo-vendor
       - printf '[source.vendored-sources]\ndirectory = "/app/skrizhal-cargo-vendor"\n\n[source.crates-io]\nreplace-with = "vendored-sources"\n' > cargo/config
-      # Stub main.rs so cargo compiles all deps but not the real app code.
-      # Skrizhal is a lib+bin package, so a stub lib.rs is needed too.
-      - mkdir -p src
+      # Stub main.rs (root package) and lib.rs (skrizhal-core workspace member)
+      # so cargo compiles every dependency but not the real app/core code.
+      - mkdir -p src core/src
       - echo 'fn main() {}' > src/main.rs
-      - echo '' > src/lib.rs
+      - echo '' > core/src/lib.rs
       - cargo --offline build --release --manifest-path Cargo.toml
-      # Remove stub skrizhal artifacts so Module 2 always recompiles from real source
+      # Remove stub artifacts (both workspace members) so Module 2 always
+      # recompiles both from real source
       - rm -f /app/skrizhal-cargo-target/release/skrizhal
       - rm -f /app/skrizhal-cargo-target/release/skrizhal.d
       - rm -rf /app/skrizhal-cargo-target/release/.fingerprint/skrizhal-*
+      - rm -rf /app/skrizhal-cargo-target/release/.fingerprint/skrizhal_core-*
       - rm -rf /app/skrizhal-cargo-target/release/deps/skrizhal-*
       - rm -rf /app/skrizhal-cargo-target/release/deps/libskrizhal-*
+      - rm -rf /app/skrizhal-cargo-target/release/deps/skrizhal_core-*
+      - rm -rf /app/skrizhal-cargo-target/release/deps/libskrizhal_core-*
 
   # Module 2: compile only the skrizhal crate, using pre-built deps from Module 1.
   # Cache key includes all source files, so it always misses on code changes —

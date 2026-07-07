@@ -42,15 +42,15 @@ mod tests {
 
     const SAMPLE: &str = r#"
 a:
-  type: award
+  category: Award
   title: A
   tags: [ministry, current]
 b:
-  type: award
+  category: Award
   title: B
   tags: [ministry, academic]
 c:
-  type: award
+  category: Award
   title: C
   tags: [academic]
 "#;

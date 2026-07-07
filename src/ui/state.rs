@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use skrizhal::CvEntry;
+use skrizhal_core::CvEntry;
 
 pub struct AppState {
     pub entries: Vec<CvEntry>,
@@ -13,7 +13,7 @@ pub struct AppState {
     /// never silently clobbered with an empty entry list.
     pub load_blocked: bool,
     pub search: String,
-    pub filter_type: Option<String>,
+    pub filter_category: Option<String>,
     pub filter_tag: Option<String>,
 }
 
@@ -34,13 +34,13 @@ pub fn load_initial(data_path: PathBuf) -> (AppState, Option<String>) {
                 selected_key: None,
                 load_blocked: false,
                 search: String::new(),
-                filter_type: None,
+                filter_category: None,
                 filter_tag: None,
             },
             None,
         );
     }
-    match skrizhal::load_file(&data_path) {
+    match skrizhal_core::load_file(&data_path) {
         Ok(entries) => (
             AppState {
                 entries,
@@ -48,7 +48,7 @@ pub fn load_initial(data_path: PathBuf) -> (AppState, Option<String>) {
                 selected_key: None,
                 load_blocked: false,
                 search: String::new(),
-                filter_type: None,
+                filter_category: None,
                 filter_tag: None,
             },
             None,
@@ -60,7 +60,7 @@ pub fn load_initial(data_path: PathBuf) -> (AppState, Option<String>) {
                 selected_key: None,
                 load_blocked: true,
                 search: String::new(),
-                filter_type: None,
+                filter_category: None,
                 filter_tag: None,
             },
             Some(format!("{err}")),
@@ -78,7 +78,7 @@ pub fn reload(state: &SharedState) -> Result<(), String> {
         s.load_blocked = false;
         return Ok(());
     }
-    match skrizhal::load_file(&path) {
+    match skrizhal_core::load_file(&path) {
         Ok(entries) => {
             let mut s = state.borrow_mut();
             s.entries = entries;
@@ -100,5 +100,5 @@ pub fn persist(state: &SharedState) -> Result<(), String> {
     if let Some(dir) = s.data_path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    skrizhal::save_file(&s.data_path, &s.entries).map_err(|e| e.to_string())
+    skrizhal_core::save_file(&s.data_path, &s.entries).map_err(|e| e.to_string())
 }

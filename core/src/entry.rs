@@ -25,8 +25,7 @@ impl<T> OneOrMany<T> {
 /// from the enclosing YAML mapping, same as a Hayagriva/BibTeX entry.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 struct RawEntry {
-    #[serde(rename = "type")]
-    entry_type: String,
+    category: String,
     title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     organization: Option<String>,
@@ -38,8 +37,8 @@ struct RawEntry {
     tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     description: Option<OneOrMany<String>>,
-    /// Type-specific fields (degree, doi, amount, ...) not modeled explicitly —
-    /// new entry types only need a registry entry, not a Rust struct change.
+    /// Category-specific fields (degree, doi, amount, ...) not modeled explicitly —
+    /// new categories only need a registry entry, not a Rust struct change.
     #[serde(flatten)]
     extra: BTreeMap<String, serde_yaml_ng::Value>,
 }
@@ -48,7 +47,7 @@ struct RawEntry {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CvEntry {
     pub key: String,
-    pub entry_type: String,
+    pub category: String,
     pub title: String,
     pub organization: Option<String>,
     pub location: Option<String>,
@@ -62,7 +61,7 @@ impl CvEntry {
     fn from_raw(key: String, raw: RawEntry) -> Self {
         CvEntry {
             key,
-            entry_type: raw.entry_type,
+            category: raw.category,
             title: raw.title,
             organization: raw.organization,
             location: raw.location,
@@ -80,7 +79,7 @@ impl CvEntry {
             _ => Some(OneOrMany::Many(self.description)),
         };
         RawEntry {
-            entry_type: self.entry_type,
+            category: self.category,
             title: self.title,
             organization: self.organization,
             location: self.location,
@@ -203,7 +202,7 @@ mod tests {
 
     const SAMPLE: &str = r#"
 hope-united-2025:
-  type: ministry-position
+  category: Ministry Position
   title: Student Minister
   organization: Hope United Church
   location: Halifax, NS
@@ -214,7 +213,7 @@ hope-united-2025:
     - Liturgical preparation for seasonal services
 
 mdiv-2024:
-  type: education
+  category: Education
   title: Master of Divinity (in progress)
   organization: Atlantic School of Theology
   date: 2023/
@@ -233,7 +232,7 @@ mdiv-2024:
     fn parse_common_fields() {
         let entries = parse_str(SAMPLE).unwrap();
         let e = entries.iter().find(|e| e.key == "hope-united-2025").unwrap();
-        assert_eq!(e.entry_type, "ministry-position");
+        assert_eq!(e.category, "Ministry Position");
         assert_eq!(e.title, "Student Minister");
         assert_eq!(e.organization.as_deref(), Some("Hope United Church"));
         assert_eq!(e.location.as_deref(), Some("Halifax, NS"));
@@ -243,7 +242,7 @@ mdiv-2024:
     }
 
     #[test]
-    fn parse_extra_type_specific_fields() {
+    fn parse_extra_category_specific_fields() {
         let entries = parse_str(SAMPLE).unwrap();
         let e = entries.iter().find(|e| e.key == "mdiv-2024").unwrap();
         assert_eq!(
@@ -260,7 +259,7 @@ mdiv-2024:
     fn description_single_string_becomes_one_element_vec() {
         let yaml = r#"
 solo:
-  type: award
+  category: Award
   title: Some Award
   description: A single-line description
 "#;
@@ -318,7 +317,7 @@ solo:
         let dup = orig.duplicate_with_key("mdiv-2024-copy".into());
         assert_eq!(dup.key, "mdiv-2024-copy");
         assert_eq!(dup.title, orig.title);
-        assert_eq!(dup.entry_type, orig.entry_type);
+        assert_eq!(dup.category, orig.category);
     }
 
     #[test]

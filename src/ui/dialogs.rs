@@ -30,7 +30,7 @@ pub fn show_manage_tags_dialog(
     list_box.set_margin_start(12);
     list_box.set_margin_end(12);
 
-    let tags = skrizhal::all_tags_with_counts(&state.borrow().entries);
+    let tags = skrizhal_core::all_tags_with_counts(&state.borrow().entries);
     if tags.is_empty() {
         let placeholder = adw::ActionRow::builder()
             .title("No tags yet")
@@ -52,7 +52,7 @@ pub fn show_manage_tags_dialog(
             if new_name.is_empty() || new_name == old_tag {
                 return;
             }
-            skrizhal::rename_tag(&mut state.borrow_mut().entries, &old_tag, &new_name);
+            skrizhal_core::rename_tag(&mut state.borrow_mut().entries, &old_tag, &new_name);
             on_change(None);
             dialog_clone.close();
         });
@@ -91,7 +91,9 @@ pub fn choose_data_file(
             let Some(path) = file.path() else { return };
 
             state.borrow_mut().data_path = path.clone();
-            let _ = Config { data_path: path }.save();
+            let mut cfg = Config::load();
+            cfg.data_path = path;
+            let _ = cfg.save();
 
             match super::state::reload(&state) {
                 Ok(()) => on_change(None),

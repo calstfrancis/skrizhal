@@ -49,6 +49,46 @@ pub fn parse_date_range(s: &str) -> DateRange {
     }
 }
 
+/// Which shape a date takes in the editor: a single point in time, a closed
+/// range with both ends known, or an open-ended range still in progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateMode {
+    Single,
+    Range,
+    Ongoing,
+}
+
+/// Splits a stored date string into its editing shape plus start/end text,
+/// preserving whatever precision the user originally typed (`"2020"` vs
+/// `"2020-09"`) rather than round-tripping through `parse_year_month`.
+pub fn split_date_string(date: &str) -> (DateMode, String, String) {
+    let date = date.trim();
+    match date.find('/') {
+        Some(idx) => {
+            let start = date[..idx].trim().to_string();
+            let end = date[idx + 1..].trim().to_string();
+            if end.is_empty() {
+                (DateMode::Ongoing, start, String::new())
+            } else {
+                (DateMode::Range, start, end)
+            }
+        }
+        None => (DateMode::Single, date.to_string(), String::new()),
+    }
+}
+
+/// Recomposes a `(mode, start, end)` triple back into the single stored
+/// date string. The inverse of `split_date_string`.
+pub fn join_date_string(mode: DateMode, start: &str, end: &str) -> String {
+    let start = start.trim();
+    let end = end.trim();
+    match mode {
+        DateMode::Single => start.to_string(),
+        DateMode::Range => format!("{start}/{end}"),
+        DateMode::Ongoing => format!("{start}/"),
+    }
+}
+
 /// A `(end_year, end_month, start_year, start_month)` tuple such that a
 /// larger key sorts as more recent — descending sort puts current/ongoing
 /// entries first, unparseable/missing dates last.
@@ -73,6 +113,53 @@ mod tests {
     #[test]
     fn parses_single_year() {
         assert_eq!(parse_date_range("2020"), (Some((2020, 1)), Some((2020, 1))));
+    }
+
+    #[test]
+    fn split_single_date() {
+        assert_eq!(
+            split_date_string("2020"),
+            (DateMode::Single, "2020".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn split_closed_range() {
+        assert_eq!(
+            split_date_string("2025-09/2026-04"),
+            (DateMode::Range, "2025-09".to_string(), "2026-04".to_string())
+        );
+    }
+
+    #[test]
+    fn split_ongoing() {
+        assert_eq!(
+            split_date_string("2023/"),
+            (DateMode::Ongoing, "2023".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn split_empty_is_single() {
+        assert_eq!(split_date_string(""), (DateMode::Single, String::new(), String::new()));
+    }
+
+    #[test]
+    fn join_round_trips_each_mode() {
+        assert_eq!(join_date_string(DateMode::Single, "2020", ""), "2020");
+        assert_eq!(
+            join_date_string(DateMode::Range, "2025-09", "2026-04"),
+            "2025-09/2026-04"
+        );
+        assert_eq!(join_date_string(DateMode::Ongoing, "2023", ""), "2023/");
+    }
+
+    #[test]
+    fn split_then_join_is_identity_for_well_formed_input() {
+        for input in ["2020", "2020-09", "2025-09/2026-04", "2023/"] {
+            let (mode, start, end) = split_date_string(input);
+            assert_eq!(join_date_string(mode, &start, &end), input);
+        }
     }
 
     #[test]
@@ -103,17 +190,17 @@ mod tests {
     fn sort_entries_most_recent_first_and_ongoing_wins() {
         let yaml = r#"
 old-job:
-  type: employment
+  category: Employment
   title: Old Job
   date: 2018-01/2019-06
 
 current-job:
-  type: employment
+  category: Employment
   title: Current Job
   date: 2023/
 
 mid-job:
-  type: employment
+  category: Employment
   title: Mid Job
   date: 2020-01/2022-12
 "#;
@@ -127,11 +214,11 @@ mid-job:
     fn missing_date_sorts_last() {
         let yaml = r#"
 no-date:
-  type: award
+  category: Award
   title: No Date
 
 dated:
-  type: award
+  category: Award
   title: Dated
   date: 2020
 "#;

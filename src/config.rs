@@ -8,12 +8,16 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     #[serde(default = "default_data_path")]
     pub data_path: PathBuf,
+    /// Shown once on first run; reachable again later via the header menu.
+    #[serde(default)]
+    pub has_seen_field_guide: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             data_path: default_data_path(),
+            has_seen_field_guide: false,
         }
     }
 }

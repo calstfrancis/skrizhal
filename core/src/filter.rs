@@ -1,11 +1,11 @@
 use crate::entry::CvEntry;
 
 /// Filter criteria for browsing entries — all `None`/empty fields match
-/// everything. Used by both the future GUI's sidebar filter and the `!`
-/// autocomplete popup search in Zerkalo.
+/// everything. Used by both the GUI's sidebar filter and the `!` autocomplete
+/// popup search in Zerkalo.
 #[derive(Clone, Debug, Default)]
 pub struct FilterOptions<'a> {
-    pub entry_type: Option<&'a str>,
+    pub category: Option<&'a str>,
     pub tag: Option<&'a str>,
     /// Case-insensitive substring match against title, organization, and
     /// description text.
@@ -17,8 +17,8 @@ pub fn filter_entries<'a>(entries: &'a [CvEntry], opts: &FilterOptions) -> Vec<&
     entries
         .iter()
         .filter(|e| {
-            if let Some(t) = opts.entry_type {
-                if e.entry_type != t {
+            if let Some(c) = opts.category {
+                if e.category != c {
                     return false;
                 }
             }
@@ -51,28 +51,28 @@ mod tests {
 
     const SAMPLE: &str = r#"
 hope-united-2025:
-  type: ministry-position
+  category: Ministry Position
   title: Student Minister
   organization: Hope United Church
   tags: [ministry, current]
 
 mdiv-2024:
-  type: education
+  category: Education
   title: Master of Divinity
   organization: Atlantic School of Theology
   tags: [academic, ministry]
 
 ssrhc-award:
-  type: award
+  category: Award
   title: SSHRC Doctoral Award
   tags: [academic]
 "#;
 
     #[test]
-    fn filter_by_type() {
+    fn filter_by_category() {
         let entries = parse_str(SAMPLE).unwrap();
         let opts = FilterOptions {
-            entry_type: Some("education"),
+            category: Some("Education"),
             ..Default::default()
         };
         let result = filter_entries(&entries, &opts);
@@ -110,7 +110,7 @@ ssrhc-award:
         let entries = parse_str(SAMPLE).unwrap();
         let opts = FilterOptions {
             tag: Some("academic"),
-            entry_type: Some("award"),
+            category: Some("Award"),
             query: None,
         };
         let result = filter_entries(&entries, &opts);

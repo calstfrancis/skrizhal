@@ -2,10 +2,10 @@ use crate::entry::{parse_str, CvEntry, LoadError};
 use crate::registry;
 
 /// Soft-validation findings — never hard errors, since the YAML schema is
-/// deliberately open (new types/fields don't require code changes).
+/// deliberately open (new categories/fields don't require code changes).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Warning {
-    UnknownType { key: String, entry_type: String },
+    UnknownCategory { key: String, category: String },
     MissingRecommendedField { key: String, field: &'static str },
     DuplicateKey { key: String },
 }
@@ -21,17 +21,17 @@ fn field_present(entry: &CvEntry, field: &str) -> bool {
     }
 }
 
-/// Checks unknown `type` values and missing type-recommended fields. Never
-/// flags a type that isn't in the registry as anything but `UnknownType` —
-/// unregistered types get no recommended-field checks since there's nothing
-/// to check them against.
+/// Checks unknown `category` values and missing category-recommended fields.
+/// Never flags a category that isn't in the registry as anything but
+/// `UnknownCategory` — unregistered categories get no recommended-field
+/// checks since there's nothing to check them against.
 pub fn validate_entries(entries: &[CvEntry]) -> Vec<Warning> {
     let mut warnings = Vec::new();
     for e in entries {
-        match registry::lookup(&e.entry_type) {
-            None => warnings.push(Warning::UnknownType {
+        match registry::lookup(&e.category) {
+            None => warnings.push(Warning::UnknownCategory {
                 key: e.key.clone(),
-                entry_type: e.entry_type.clone(),
+                category: e.category.clone(),
             }),
             Some(spec) => {
                 for field in spec.recommended_fields {
@@ -88,7 +88,7 @@ pub fn validate_yaml_text(yaml: &str) -> Vec<Warning> {
 }
 
 /// Convenience: parses `yaml` and runs both the text-level (duplicate key)
-/// and entry-level (unknown type, missing fields) checks in one call.
+/// and entry-level (unknown category, missing fields) checks in one call.
 pub fn validate_all(yaml: &str) -> Result<Vec<Warning>, LoadError> {
     let mut warnings = validate_yaml_text(yaml);
     let entries = parse_str(yaml)?;
@@ -101,17 +101,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unknown_type_is_flagged() {
+    fn unknown_category_is_flagged() {
         let yaml = r#"
 mystery:
-  type: not-a-real-type
+  category: Not A Real Category
   title: Something
 "#;
         let entries = parse_str(yaml).unwrap();
         let warnings = validate_entries(&entries);
-        assert!(warnings.contains(&Warning::UnknownType {
+        assert!(warnings.contains(&Warning::UnknownCategory {
             key: "mystery".into(),
-            entry_type: "not-a-real-type".into(),
+            category: "Not A Real Category".into(),
         }));
     }
 
@@ -119,7 +119,7 @@ mystery:
     fn missing_recommended_field_is_flagged() {
         let yaml = r#"
 bare-job:
-  type: employment
+  category: Employment
   title: Some Job
 "#;
         let entries = parse_str(yaml).unwrap();
@@ -138,7 +138,7 @@ bare-job:
     fn fully_specified_entry_has_no_warnings() {
         let yaml = r#"
 complete-job:
-  type: employment
+  category: Employment
   title: Some Job
   organization: Some Org
   location: Somewhere
@@ -150,10 +150,10 @@ complete-job:
     }
 
     #[test]
-    fn type_specific_extra_field_satisfies_recommendation() {
+    fn category_specific_extra_field_satisfies_recommendation() {
         let yaml = r#"
 mdiv-2024:
-  type: education
+  category: Education
   title: Master of Divinity
   organization: Atlantic School of Theology
   date: 2023/
@@ -171,11 +171,11 @@ mdiv-2024:
     fn detects_duplicate_top_level_key() {
         let yaml = r#"
 same-key:
-  type: award
+  category: Award
   title: First
 
 same-key:
-  type: award
+  category: Award
   title: Second
 "#;
         let dups = find_duplicate_top_level_keys(yaml);
@@ -184,7 +184,7 @@ same-key:
 
     #[test]
     fn duplicate_key_reported_once_even_if_repeated_thrice() {
-        let yaml = "a:\n  type: award\nb:\n  type: award\na:\n  type: award\na:\n  type: award\n";
+        let yaml = "a:\n  category: Award\nb:\n  category: Award\na:\n  category: Award\na:\n  category: Award\n";
         let dups = find_duplicate_top_level_keys(yaml);
         assert_eq!(dups, vec!["a".to_string()]);
     }
@@ -193,10 +193,10 @@ same-key:
     fn no_duplicates_in_well_formed_file() {
         let yaml = r#"
 one:
-  type: award
+  category: Award
   title: First
 two:
-  type: award
+  category: Award
   title: Second
 "#;
         assert!(find_duplicate_top_level_keys(yaml).is_empty());
@@ -206,10 +206,10 @@ two:
     fn nested_indented_keys_are_not_mistaken_for_top_level_duplicates() {
         let yaml = r#"
 one:
-  type: award
+  category: Award
   title: First
 two:
-  type: award
+  category: Award
   title: First
 "#;
         // "title" appears twice but always indented — must not be flagged.
@@ -220,11 +220,11 @@ two:
     fn validate_all_combines_text_and_entry_warnings() {
         let yaml = r#"
 dup:
-  type: bogus-type
+  category: Bogus Category
   title: A
 
 dup:
-  type: bogus-type
+  category: Bogus Category
   title: B
 "#;
         let warnings = validate_all(yaml).unwrap();
@@ -233,6 +233,6 @@ dup:
             .any(|w| matches!(w, Warning::DuplicateKey { key } if key == "dup")));
         assert!(warnings
             .iter()
-            .any(|w| matches!(w, Warning::UnknownType { .. })));
+            .any(|w| matches!(w, Warning::UnknownCategory { .. })));
     }
 }

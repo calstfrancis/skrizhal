@@ -2,18 +2,18 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use skrizhal::{filter_entries, FilterOptions};
+use skrizhal_core::{filter_entries, FilterOptions};
 
 use super::state::{ChangeCallback, SharedState};
 
-const ALL_TYPES: &str = "All Types";
+const ALL_CATEGORIES: &str = "All Categories";
 const ALL_TAGS: &str = "All Tags";
 
 #[derive(Clone)]
 pub struct SidebarWidgets {
     pub root: gtk4::Box,
     pub search_entry: gtk4::SearchEntry,
-    pub type_filter: gtk4::DropDown,
+    pub category_filter: gtk4::DropDown,
     pub tag_filter: gtk4::DropDown,
     pub list_box: gtk4::ListBox,
     pub add_button: gtk4::Button,
@@ -33,16 +33,16 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
     root.append(&search_entry);
 
     let filter_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    let mut type_strings = vec![ALL_TYPES.to_string()];
-    type_strings.extend(skrizhal::TYPE_REGISTRY.iter().map(|t| t.id.to_string()));
-    let type_refs: Vec<&str> = type_strings.iter().map(|s| s.as_str()).collect();
-    let type_filter = gtk4::DropDown::from_strings(&type_refs);
-    type_filter.set_hexpand(true);
+    let mut category_strings = vec![ALL_CATEGORIES.to_string()];
+    category_strings.extend(skrizhal_core::CATEGORY_REGISTRY.iter().map(|c| c.name.to_string()));
+    let category_refs: Vec<&str> = category_strings.iter().map(|s| s.as_str()).collect();
+    let category_filter = gtk4::DropDown::from_strings(&category_refs);
+    category_filter.set_hexpand(true);
 
     let tag_filter = gtk4::DropDown::from_strings(&[ALL_TAGS]);
     tag_filter.set_hexpand(true);
 
-    filter_row.append(&type_filter);
+    filter_row.append(&category_filter);
     filter_row.append(&tag_filter);
     root.append(&filter_row);
 
@@ -62,7 +62,7 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
     SidebarWidgets {
         root,
         search_entry,
-        type_filter,
+        category_filter,
         tag_filter,
         list_box,
         add_button,
@@ -73,7 +73,7 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
 /// Rebuilds the tag filter's options from the current entry set, keeping the
 /// selection on "All Tags" if the previously selected tag no longer exists.
 pub fn refresh_tag_filter_options(widgets: &SidebarWidgets, state: &SharedState) {
-    let tags = skrizhal::all_tags_with_counts(&state.borrow().entries);
+    let tags = skrizhal_core::all_tags_with_counts(&state.borrow().entries);
     let mut strings = vec![ALL_TAGS.to_string()];
     strings.extend(tags.into_iter().map(|(t, c)| format!("{t} ({c})")));
     let refs: Vec<&str> = strings.iter().map(|s| s.as_str()).collect();
@@ -96,8 +96,8 @@ fn strip_count_suffix(s: &str) -> String {
     }
 }
 
-pub fn current_filter_type(widgets: &SidebarWidgets) -> Option<String> {
-    selected_dropdown_text(&widgets.type_filter).filter(|s| s != ALL_TYPES)
+pub fn current_filter_category(widgets: &SidebarWidgets) -> Option<String> {
+    selected_dropdown_text(&widgets.category_filter).filter(|s| s != ALL_CATEGORIES)
 }
 
 pub fn current_filter_tag(widgets: &SidebarWidgets) -> Option<String> {
@@ -107,8 +107,8 @@ pub fn current_filter_tag(widgets: &SidebarWidgets) -> Option<String> {
 }
 
 /// Clears and repopulates the entry list from `state`, applying the current
-/// search/type/tag filters. Rows carry their entry's key as the widget name
-/// so selection handlers can look the entry back up.
+/// search/category/tag filters. Rows carry their entry's key as the widget
+/// name so selection handlers can look the entry back up.
 pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &ChangeCallback) {
     while let Some(child) = widgets.list_box.first_child() {
         widgets.list_box.remove(&child);
@@ -116,7 +116,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
 
     let s = state.borrow();
     let opts = FilterOptions {
-        entry_type: s.filter_type.as_deref(),
+        category: s.filter_category.as_deref(),
         tag: s.filter_tag.as_deref(),
         query: if s.search.trim().is_empty() {
             None
@@ -175,7 +175,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
                     let Some(idx) = s.entries.iter().position(|e| e.key == key) else {
                         return;
                     };
-                    let new_key = skrizhal::unique_key(&format!("{key}-copy"), &s.entries);
+                    let new_key = skrizhal_core::unique_key(&format!("{key}-copy"), &s.entries);
                     let dup = s.entries[idx].duplicate_with_key(new_key.clone());
                     s.entries.push(dup);
                     new_key

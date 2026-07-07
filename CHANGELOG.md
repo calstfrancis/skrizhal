@@ -5,6 +5,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.3.0] "Full Ledger" — auto-generated keys, categories, field guide, spreadsheet view
+
+### Changed
+- **Split into a Cargo workspace** — `core/` (package `skrizhal-core`: schema, registry,
+  validation, date handling, filtering, tags — no GTK dependency at all) and the root package
+  (the GUI, depending on `skrizhal-core` + gtk4/libadwaita). Done ahead of Phase 3 (Zerkalo
+  integration): Zerkalo pins `gtk4 = "0.7"`/`libadwaita = "0.5"`, incompatible with Skrizhal's
+  `0.11.4`/`0.9.2` — a direct dependency on the old single-crate layout would have tried to
+  compile two incompatible copies of the same GTK bindings into Zerkalo's binary. No user-visible
+  change; internal only.
+- **`type` renamed to `category` everywhere** — YAML field, UI label, and internal naming
+  (`entry_type` → `category`, `TYPE_REGISTRY` → `CATEGORY_REGISTRY`). Category values are now
+  canonical Title Case strings (`Ministry Position`) rather than kebab-case ids
+  (`ministry-position`), so raw YAML reads naturally; lookup is case-insensitive.
+- **Date split into Start/End** — the detail form now has a Date Type dropdown (Single Date /
+  Date Range / Ongoing) plus separate Start Date and End Date fields (End hidden except in Range
+  mode), instead of one raw range string. Storage format is unchanged — `date::split_date_string`/
+  `join_date_string` convert between the form fields and the existing single stored string.
+
+### Added
+- **Auto-generated entry keys** — a new entry's Key follows `slugify(organization + title)` live
+  as you type, until you edit Key directly (auto-follow stops permanently for that entry) or save
+  it (a saved entry's key never silently changes again on further edits).
+- **Live duplicate-key feedback** — the Key field shows an error state immediately for an empty
+  or already-used key, on top of the existing hard block at Save.
+- **Category suggestion popover and placeholder** — lists all registered categories in Title Case;
+  the field also shows "Education, Employment, Awards, etc..." placeholder text once focused
+  while empty (via the `AdwEntryRow`'s `GtkEditable` delegate, since the row has no
+  `placeholder-text` property of its own).
+- **Field Guide** — a startup popup (first run only, reachable afterward via the header menu)
+  explaining what each field is for, with the most attention on Tags: the mechanism for filtering
+  one CV-element database down into different CVs.
+- **Status bar** — bottom bar with a Spreadsheet toggle (left) and a version button (right,
+  `v0.3.0`, opens a Changelog window rendering `CHANGELOG.md`, embedded via `include_str!` so it's
+  always available regardless of install method), matching the standard app design.
+- **Spreadsheet view** — toggles the whole window into an editable grid (Key/Category/Title/
+  Organization/Location/Date/Tags columns, one row per entry, sorted by key). Every fillable
+  column (all but Key, where it'd just create duplicates) has a drag-to-fill handle: drag a cell's
+  corner down or up over other rows and release to copy its value into all of them — handy for
+  setting a batch of entries to the same category or tag in one motion.
+
 ## [0.2.0] "First Etching" — GTK4/libadwaita editor app + first flatpak package
 
 ### Added

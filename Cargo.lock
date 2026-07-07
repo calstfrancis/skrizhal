@@ -717,7 +717,7 @@ dependencies = [
 
 [[package]]
 name = "skrizhal"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "glib",
  "gtk4",
@@ -725,9 +725,20 @@ dependencies = [
  "serde",
  "serde_yaml_ng",
  "shellexpand",
+ "skrizhal-core",
  "tempfile",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "skrizhal-core"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

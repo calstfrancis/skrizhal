@@ -3,12 +3,29 @@
 YAML editor/reader for CV elements, built to work with Zerkalo. See `plan.md` for the full
 architecture and phased build plan, and `README.md` for current status.
 
+## Workspace layout
+
+Two Cargo packages, one workspace (root `Cargo.toml` has both `[workspace]` and `[package]` —
+the root package is automatically a workspace member):
+
+- **`core/`** — package `skrizhal-core`, a lib with **no GTK/libadwaita dependency at all** (just
+  `serde`/`serde_yaml_ng`/`thiserror`). This is deliberate: Zerkalo pins `gtk4 = "0.7"` /
+  `libadwaita = "0.5"`, while Skrizhal's GUI uses `gtk4 = "0.11.4"` / `libadwaita = "0.9.2"` —
+  incompatible versions that can't both be compiled into one binary. Zerkalo depends only on
+  `skrizhal-core`, which pulls in nothing that could conflict.
+- **root (`src/`)** — package `skrizhal`, the GUI (`main.rs` + `ui/`), depends on
+  `skrizhal-core = { path = "core" }` plus gtk4/libadwaita/glib.
+
+When adding a new core module (schema, validation, parsing — anything Zerkalo might eventually
+want too), it goes in `core/src/`, not `src/`. GUI code imports it as `skrizhal_core::...`.
+
 ## Version
 
-Single source of truth: `version` in `Cargo.toml`. Releases get a two-word name (adjective +
-noun) per the root CLAUDE.md convention — named in the CHANGELOG heading, the metainfo release
-description, and the commit message. Unlike Kopilka/Zerkalo, there's no in-app "What's New"
-window yet, so the name doesn't need a source constant anywhere.
+Single source of truth: `version` in `Cargo.toml` (both packages should stay in lockstep — bump
+both together). Releases get a two-word name (adjective + noun) per the root CLAUDE.md convention
+— named in the CHANGELOG heading, the metainfo release description, and the commit message.
+Unlike Kopilka/Zerkalo, there's no in-app "What's New" window yet, so the name doesn't need a
+source constant anywhere.
 
 ## Documentation policy
 
@@ -20,16 +37,24 @@ documentation policy.
 
 - No comments unless the WHY is non-obvious
 - No multi-line docstrings or comment blocks
-- `cargo clippy --all-targets` should be clean before committing
+- `cargo clippy --workspace --all-targets` should be clean before committing
 
 ## Build
 
 - `.cargo/config.toml` pins the linker to `gcc` — this system's `rustc` defaults to `clang`,
   which isn't installed. Without this, even `cargo build` on a trivial crate fails.
+- `cargo build`/`test`/`clippy` without `--workspace` only covers the root `skrizhal` package —
+  add `--workspace` (or `cd core && cargo test`) to also cover `skrizhal-core`.
 - GTK4/libadwaita GUI lives in `src/main.rs` + `src/ui/`, following Zerkalo's conventions (see
   the root CLAUDE.md's "UI design standard" section) where they fit — this is a simpler CRUD
   app, so not every Zerkalo pattern applies (no command palette, no hand-built hamburger popover
-  needed yet since the header menu only has three items).
+  needed yet since the header menu only has a handful of items).
+- **GApplication single-instance gotcha when testing under Xvfb**: if a Skrizhal instance (dev
+  build or the installed flatpak) is already registered on the *real* session D-Bus, a new test
+  launch will just relay-activate it and exit immediately (exit 0, no output) instead of actually
+  running your rebuilt binary — easy to mistake for a successful silent run. Check
+  `flatpak list --app | grep -i skrizhal` and `ps aux | grep skrizhal` if a test launch exits
+  suspiciously fast with no log output.
 
 ## Flatpak packaging
 
@@ -37,9 +62,12 @@ documentation policy.
   job**, run by Cal. This applies even for "just testing the manifest" — prep the manifest, then
   hand off.
 - Manifest: `packaging/io.github.calstfrancis.Skrizhal.yml`. Two modules — `skrizhal-deps`
-  (vendors and pre-builds all Cargo dependencies, cached independently) and `skrizhal` (builds
-  just this crate against the pre-built deps) — same caching split Zerkalo uses, so dev-build
-  iterations that don't touch `Cargo.lock` skip re-vendoring.
+  (vendors and pre-builds all Cargo dependencies for the whole workspace, cached independently)
+  and `skrizhal` (builds both workspace members against the pre-built deps) — same caching split
+  Zerkalo uses, so dev-build iterations that don't touch `Cargo.lock` skip re-vendoring. The
+  deps module's stub-build step stubs *both* `src/main.rs` and `core/src/lib.rs` (and its source
+  list includes `core/Cargo.toml`, since the workspace won't resolve without it) — remember both
+  halves if this ever needs touching again.
 - Runtime: `org.gnome.Platform`//`50` with the `rust-stable` SDK extension. Needs the 25.08
   branch specifically (rustc 1.96.1) — the 48/24.08 branch only ships rustc 1.89, which is too
   old for current gtk4-rs/libadwaita-rs (they need 1.92+). Re-check this pairing before bumping
@@ -55,16 +83,25 @@ documentation policy.
 
 ## Architecture
 
-- `src/entry.rs` — `CvEntry` schema, YAML load/save, `slugify`/`unique_key`/`duplicate_with_key`
-- `src/registry.rs` — namespaced CV entry type table
-- `src/validate.rs` — soft-validation warnings
-- `src/date.rs` — date-range parsing/sorting
-- `src/filter.rs` — tag/type/search filtering
-- `src/tags.rs` — tag rename/merge, usage counts
-- `src/config.rs` — `~/.config/skrizhal/config.toml` (data file path)
-- `src/ui/` — GTK4/libadwaita app: `state.rs` (shared `AppState` + the `ChangeCallback` that
-  persists + refreshes after any mutation), `sidebar.rs`, `detail.rs`, `dialogs.rs`, `app_window.rs`
+**Core (`core/src/`, package `skrizhal-core`, no GTK deps):**
+- `entry.rs` — `CvEntry` schema, YAML load/save, `slugify`/`unique_key`/`duplicate_with_key`
+- `registry.rs` — namespaced CV category table (canonical Title Case names, e.g. `"Ministry Position"`)
+- `validate.rs` — soft-validation warnings
+- `date.rs` — date-range parsing/sorting, `DateMode`/`split_date_string`/`join_date_string`
+- `filter.rs` — tag/category/search filtering
+- `tags.rs` — tag rename/merge, usage counts
 
-Parses CV YAML with plain `serde_yaml_ng` against this crate's own schema — deliberately does
-**not** go through the `hayagriva` crate's parser, since its `EntryType` enum is closed and would
-reject custom types like `ministry-position`. See `plan.md` for the full reasoning.
+**GUI (root `src/`, package `skrizhal`):**
+- `config.rs` — `~/.config/skrizhal/config.toml` (data file path, field-guide-seen flag)
+- `ui/state.rs` — shared `AppState` + the `ChangeCallback` that persists + refreshes after any mutation
+- `ui/sidebar.rs`, `ui/detail.rs`, `ui/dialogs.rs`, `ui/spreadsheet.rs`, `ui/field_guide.rs`,
+  `ui/changelog.rs`, `ui/app_window.rs`
+
+Parses CV YAML with plain `serde_yaml_ng` against `skrizhal-core`'s own schema — deliberately
+does **not** go through the `hayagriva` crate's parser, since its `EntryType` enum is closed and
+would reject custom categories like `"Ministry Position"`. See `plan.md` for the full reasoning.
+
+## Phase 3 (Zerkalo integration) status
+
+Not started. See `plan.md`'s Phase 3a/3b breakdown. The workspace split above was Phase 3a's
+first step, done ahead of the rest since it was low-risk and unblocks everything else.

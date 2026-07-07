@@ -1,0 +1,16 @@
+[package]
+name = "skrizhal-core"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "CV entry schema, parsing, and validation for Skrizhal — no GUI dependencies, so Zerkalo (or anything else) can depend on it without pulling in a second copy of GTK4/libadwaita"
+homepage = "https://github.com/calstfrancis/skrizhal"
+repository = "https://github.com/calstfrancis/skrizhal"
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml_ng = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
