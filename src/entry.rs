@@ -92,6 +92,52 @@ impl CvEntry {
     }
 }
 
+impl CvEntry {
+    /// Clones this entry under a new key — used by the "Duplicate" action.
+    pub fn duplicate_with_key(&self, new_key: String) -> CvEntry {
+        let mut copy = self.clone();
+        copy.key = new_key;
+        copy
+    }
+}
+
+/// Lowercases and hyphenates `s` for use as a citation-style key
+/// (`"Student Minister"` -> `"student-minister"`).
+pub fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for c in s.chars() {
+        if c.is_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+/// Returns `base` if it isn't already used as a key in `existing`, otherwise
+/// `base-2`, `base-3`, ... until an unused key is found.
+pub fn unique_key(base: &str, existing: &[CvEntry]) -> String {
+    let base = if base.is_empty() { "entry" } else { base };
+    if !existing.iter().any(|e| e.key == base) {
+        return base.to_string();
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{base}-{n}");
+        if !existing.iter().any(|e| e.key == candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
     #[error("failed to read {path}: {source}")]
@@ -257,5 +303,33 @@ solo:
     fn parse_invalid_yaml_returns_parse_error() {
         let err = parse_str("not: valid: yaml: at all: [");
         assert!(matches!(err, Err(LoadError::Parse(_))));
+    }
+
+    #[test]
+    fn slugify_basic() {
+        assert_eq!(slugify("Student Minister"), "student-minister");
+        assert_eq!(slugify("  Master of Divinity!! "), "master-of-divinity");
+    }
+
+    #[test]
+    fn duplicate_with_key_copies_fields_under_new_key() {
+        let entries = parse_str(SAMPLE).unwrap();
+        let orig = entries.iter().find(|e| e.key == "mdiv-2024").unwrap();
+        let dup = orig.duplicate_with_key("mdiv-2024-copy".into());
+        assert_eq!(dup.key, "mdiv-2024-copy");
+        assert_eq!(dup.title, orig.title);
+        assert_eq!(dup.entry_type, orig.entry_type);
+    }
+
+    #[test]
+    fn unique_key_returns_base_when_unused() {
+        let entries = parse_str(SAMPLE).unwrap();
+        assert_eq!(unique_key("brand-new", &entries), "brand-new");
+    }
+
+    #[test]
+    fn unique_key_appends_suffix_when_taken() {
+        let entries = parse_str(SAMPLE).unwrap();
+        assert_eq!(unique_key("mdiv-2024", &entries), "mdiv-2024-2");
     }
 }

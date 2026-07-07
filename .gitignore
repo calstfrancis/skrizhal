@@ -1,1 +1,5 @@
 /target
+
+# Flatpak build artifacts
+/.flatpak-builder/
+/build-flatpak/

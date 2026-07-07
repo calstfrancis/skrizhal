@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.calstfrancis.Skrizhal</id>
+  <name>Skrizhal</name>
+  <summary>Build a reusable YAML database of CV elements</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      Skrizhal is a GTK4 editor for CV/résumé elements — jobs, education, awards,
+      publications, service, and more — each stored as a YAML entry with a
+      citation-style key. Instead of hand-typing (and hand-toggling) a new CV
+      for every application, build the database once and let a style layer
+      pull entries in as needed.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Sidebar with search and type/tag filtering, sorted most-recent-first</li>
+      <li>Structured form for common fields (key, type, title, organization, location,
+        date, tags, description), with a suggestion popover for known entry types</li>
+      <li>Dynamic "Additional Fields" editor for type-specific data (degree, DOI,
+        award amount, and anything else a given entry type needs)</li>
+      <li>Raw YAML toggle — edit an entry's serialized block directly when the
+        structured form doesn't fit</li>
+      <li>Add, duplicate, and delete entries, with a confirmation before delete</li>
+      <li>Manage Tags dialog — rename a tag everywhere at once, or merge two tags
+        by renaming one onto the other</li>
+      <li>Configurable data file location, with a guard against saving over a file
+        that failed to parse</li>
+    </ul>
+    <p>
+      Designed to work alongside Zerkalo, which will be able to pull entries into
+      a Typst CV document in a future release.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.calstfrancis.Skrizhal.desktop</launchable>
+  <url type="homepage">https://github.com/calstfrancis/skrizhal</url>
+  <url type="bugtracker">https://github.com/calstfrancis/skrizhal/issues</url>
+  <developer id="io.github.calstfrancis">
+    <name>Cal St Francis</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/calstfrancis/skrizhal/main/packaging/skrizhal-screenshot.png</image>
+      <caption>Skrizhal editing a CV entry, with type-specific fields and tag filtering</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.2.0" date="2026-07-07">
+      <description>
+        <p>0.2.0 "First Etching" — First packaged release. GTK4/libadwaita editor: sidebar with search/type/tag filtering, structured entry form with a dynamic type-specific fields editor, raw YAML toggle, add/duplicate/delete with delete confirmation, Manage Tags dialog with rename/merge, and a configurable data file location.</p>
+      </description>
+    </release>
+  </releases>
+</component>

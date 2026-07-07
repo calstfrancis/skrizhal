@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Skrizhal
+GenericName=CV Element Database
+Comment=Build a reusable YAML database of CV/résumé elements
+Exec=skrizhal
+Icon=io.github.calstfrancis.Skrizhal
+Type=Application
+Categories=Office;
+Keywords=cv;resume;curriculum vitae;yaml;typst;zerkalo;
+StartupWMClass=Skrizhal
+StartupNotify=true

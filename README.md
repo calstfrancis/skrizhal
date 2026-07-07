@@ -13,8 +13,12 @@ build plan.
 
 ## Status
 
-**Phase 1 complete: core crate, no UI yet.** `skrizhal` is currently a library (`src/lib.rs`)
-with no GTK application on top — that's Phase 2. Phase 3 is Zerkalo integration.
+**Phase 2 complete: GTK4/libadwaita editor app on top of the core crate.** Browse, add, edit,
+duplicate, and delete CV entries; toggle to raw YAML per entry; manage tags across the whole
+database. Phase 3 (Zerkalo integration) is next.
+
+Run it with `cargo run`. Data defaults to `~/.local/share/skrizhal/cv-elements.yaml`; override via
+`~/.config/skrizhal/config.toml` or the in-app "Choose Data File…" action.
 
 ## What it does today
 
@@ -31,6 +35,20 @@ with no GTK application on top — that's Phase 2. Phase 3 is Zerkalo integratio
 - **Date sorting** (`src/date.rs`) — parses Hayagriva-style date ranges (`2025-09/2026-04`,
   `2023/` for ongoing) into a sortable key so entries can be listed most-recent-first.
 - **Filtering** (`src/filter.rs`) — filter a list of entries by type, tag, and free-text search.
+
+## Editor app (`src/main.rs`, `src/ui/`)
+
+- Sidebar: search + type/tag filters over an `adw::ActionRow` list, most-recent-first.
+- Detail pane: structured form for common fields, a dynamic add/remove list for type-specific
+  ("Additional Fields") entries, and a "Raw YAML" toggle to edit the entry's serialized block
+  directly.
+- Add seeds the new entry's type/tag from whatever filters are active, so it's actually visible
+  in the current view instead of vanishing into a filtered-out state.
+- Duplicate/Delete per row; Delete confirms first.
+- Manage Tags dialog: rename a tag everywhere at once; renaming onto an existing tag name merges
+  the two.
+- Data file location is configurable (`~/.config/skrizhal/config.toml` or "Choose Data File…"),
+  and a data file that fails to parse blocks saving rather than risking a silent overwrite.
 
 ## Format
 
@@ -54,6 +72,14 @@ This intentionally borrows Hayagriva's YAML *shape*, not the `hayagriva` crate's
 `plan.md` for why (its `EntryType` enum is closed and would reject custom types like
 `ministry-position`).
 
+## Installing
+
+```bash
+flatpak remote-add --user calstfrancis \
+  https://calstfrancis.github.io/flatpak/calstfrancis.flatpakrepo
+flatpak install calstfrancis io.github.calstfrancis.Skrizhal
+```
+
 ## Building
 
 ```bash
@@ -62,6 +88,9 @@ cargo test
 
 If you hit `error: linker `clang` not found`, see `.cargo/config.toml` — this system's `rustc`
 defaults to `clang`, but only `gcc` is installed; the config pins the linker to `gcc`.
+
+To build the flatpak: `flatpak-builder` is run only by `dev-build.sh` / `publish-flatpak.sh`, not
+directly — see `packaging/io.github.calstfrancis.Skrizhal.yml`.
 
 ## License
 
