@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.1-dev4] — Undo/redo, New File/Open/Save As/Preferences
+## [0.3.1] "Clear Ledger" — Undo/redo, New File/Open/Save As/Preferences, spreadsheet mode removed
 
 ### Removed
 - **Spreadsheet mode** — the bulk-edit grid view (toggle, `ui/spreadsheet.rs`, and every

@@ -47,6 +47,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.3.1" date="2026-07-08">
+      <description>
+        <p>0.3.1 "Clear Ledger" — Undo/redo (Ctrl+Z / Ctrl+Shift+Z) across every mutation. New File, Open, Save As, and Preferences for managing the data file location, replacing the old open-existing-only "Choose Data File…" picker. Default data file location moved to ~/Documents/Zerkalo/cv-elements.yaml. Files with a malformed entry now load every other entry instead of failing entirely, and old files using the pre-rename `type:` field load correctly. The spreadsheet bulk-edit grid, introduced in 0.3.0, has been removed — it never replaced what it was meant to and its add-row flow could freeze the app; entries are now added and edited one at a time through the sidebar and detail pane.</p>
+      </description>
+    </release>
+    <release version="0.3.0" date="2026-07-07">
+      <description>
+        <p>0.3.0 "Full Ledger" — Auto-generated entry keys with live duplicate feedback, categories replacing the old `type` field, a Date Type dropdown (Single/Range/Ongoing) with separate Start/End fields, a first-run Field Guide, and a spreadsheet bulk-edit view (removed in 0.3.1).</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-07-07">
       <description>
         <p>0.2.0 "First Etching" — First packaged release. GTK4/libadwaita editor: sidebar with search/type/tag filtering, structured entry form with a dynamic type-specific fields editor, raw YAML toggle, add/duplicate/delete with delete confirmation, Manage Tags dialog with rename/merge, and a configurable data file location.</p>
