@@ -204,7 +204,7 @@ mid-job:
   title: Mid Job
   date: 2020-01/2022-12
 "#;
-        let mut entries = parse_str(yaml).unwrap();
+        let mut entries = parse_str(yaml).unwrap().entries;
         sort_entries_by_date_desc(&mut entries);
         let order: Vec<&str> = entries.iter().map(|e| e.key.as_str()).collect();
         assert_eq!(order, vec!["current-job", "mid-job", "old-job"]);
@@ -222,7 +222,7 @@ dated:
   title: Dated
   date: 2020
 "#;
-        let mut entries = parse_str(yaml).unwrap();
+        let mut entries = parse_str(yaml).unwrap().entries;
         sort_entries_by_date_desc(&mut entries);
         assert_eq!(entries[0].key, "dated");
         assert_eq!(entries[1].key, "no-date");

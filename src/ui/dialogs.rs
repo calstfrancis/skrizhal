@@ -64,45 +64,168 @@ pub fn show_manage_tags_dialog(
     dialog.present();
 }
 
-pub fn choose_data_file(
-    window: &adw::ApplicationWindow,
-    state: &SharedState,
-    on_change: &ChangeCallback,
-) {
-    let file_dialog = gtk4::FileDialog::builder()
-        .title("Choose CV Elements File")
-        .build();
-
+fn yaml_filters() -> gio::ListStore {
     let filter = gtk4::FileFilter::new();
     filter.add_suffix("yaml");
     filter.add_suffix("yml");
     filter.set_name(Some("YAML files"));
     let filters = gio::ListStore::new::<gtk4::FileFilter>();
     filters.append(&filter);
-    file_dialog.set_filters(Some(&filters));
+    filters
+}
+
+fn remember_data_path(path: &std::path::Path) {
+    let mut cfg = Config::load();
+    cfg.data_path = path.to_path_buf();
+    let _ = cfg.save();
+}
+
+/// Open: switch to a different, already-existing data file.
+pub fn choose_data_file(
+    window: &adw::ApplicationWindow,
+    state: &SharedState,
+    on_change: &ChangeCallback,
+) {
+    let file_dialog = gtk4::FileDialog::builder()
+        .title("Open CV Elements File")
+        .filters(&yaml_filters())
+        .build();
 
     let state = state.clone();
     let on_change = on_change.clone();
-    file_dialog.open(
-        Some(window),
-        None::<&gio::Cancellable>,
-        move |result| {
-            let Ok(file) = result else { return };
-            let Some(path) = file.path() else { return };
+    file_dialog.open(Some(window), None::<&gio::Cancellable>, move |result| {
+        let Ok(file) = result else { return };
+        let Some(path) = file.path() else { return };
 
-            state.borrow_mut().data_path = path.clone();
-            let mut cfg = Config::load();
-            cfg.data_path = path;
-            let _ = cfg.save();
+        super::state::set_data_path(&state, path.clone());
+        remember_data_path(&path);
 
-            match super::state::reload(&state) {
-                Ok(()) => on_change(None),
-                Err(err) => {
-                    state.borrow_mut().load_blocked = true;
-                    eprintln!("skrizhal: failed to load chosen data file: {err}");
-                    on_change(None);
-                }
+        match super::state::reload(&state) {
+            Ok(()) => on_change(None),
+            Err(err) => {
+                state.borrow_mut().load_blocked = true;
+                eprintln!("skrizhal: failed to load chosen data file: {err}");
+                on_change(None);
             }
-        },
-    );
+        }
+    });
+}
+
+/// New File: start a fresh, empty CV element database at a chosen path.
+/// Doesn't touch whatever was open before — that file is left exactly as it
+/// was on disk, just no longer the active one.
+pub fn new_file(window: &adw::ApplicationWindow, state: &SharedState, on_change: &ChangeCallback) {
+    let file_dialog = gtk4::FileDialog::builder()
+        .title("New CV Elements File")
+        .initial_name("cv-elements.yaml")
+        .filters(&yaml_filters())
+        .build();
+
+    let state = state.clone();
+    let on_change = on_change.clone();
+    file_dialog.save(Some(window), None::<&gio::Cancellable>, move |result| {
+        let Ok(file) = result else { return };
+        let Some(path) = file.path() else { return };
+
+        super::state::start_new_file(&state, path.clone());
+        remember_data_path(&path);
+        if let Err(err) = super::state::persist(&state) {
+            eprintln!("skrizhal: failed to create new file: {err}");
+        }
+        on_change(None);
+    });
+}
+
+/// Save As: keep the current entries, write them to a new path, and switch
+/// to it (further changes save to the new location, not the old one).
+pub fn save_as(window: &adw::ApplicationWindow, state: &SharedState, on_change: &ChangeCallback) {
+    let file_dialog = gtk4::FileDialog::builder()
+        .title("Save CV Elements File As")
+        .initial_name("cv-elements.yaml")
+        .filters(&yaml_filters())
+        .build();
+
+    let state = state.clone();
+    let on_change = on_change.clone();
+    file_dialog.save(Some(window), None::<&gio::Cancellable>, move |result| {
+        let Ok(file) = result else { return };
+        let Some(path) = file.path() else { return };
+
+        super::state::set_data_path(&state, path.clone());
+        remember_data_path(&path);
+        if let Err(err) = super::state::persist(&state) {
+            eprintln!("skrizhal: failed to save as new file: {err}");
+        }
+        on_change(None);
+    });
+}
+
+/// Preferences: currently just the data file location, shown as a path with
+/// a "Change…" button that opens the same picker as Open/New — pick an
+/// existing file to switch to it, or type a new name to start fresh there.
+pub fn show_preferences(window: &adw::ApplicationWindow, state: &SharedState, on_change: &ChangeCallback) {
+    let dialog = adw::PreferencesWindow::builder()
+        .transient_for(window)
+        .modal(true)
+        .search_enabled(false)
+        .build();
+
+    let page = adw::PreferencesPage::new();
+    let group = adw::PreferencesGroup::builder()
+        .title("Data File")
+        .description("Where Skrizhal reads and saves your CV elements. Zerkalo's CV mode looks for this same file.")
+        .build();
+
+    let path_row = adw::ActionRow::builder()
+        .title("Location")
+        .subtitle(state.borrow().data_path.display().to_string())
+        .build();
+    let change_button = gtk4::Button::builder()
+        .label("Change…")
+        .valign(gtk4::Align::Center)
+        .css_classes(["flat"])
+        .build();
+    path_row.add_suffix(&change_button);
+    group.add(&path_row);
+    page.add(&group);
+    dialog.add(&page);
+
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let path_row = path_row.clone();
+        change_button.connect_clicked(move |_| {
+            let file_dialog = gtk4::FileDialog::builder()
+                .title("Choose Data File Location")
+                .initial_name("cv-elements.yaml")
+                .filters(&yaml_filters())
+                .build();
+            let state = state.clone();
+            let on_change = on_change.clone();
+            let path_row = path_row.clone();
+            file_dialog.save(Some(&window), None::<&gio::Cancellable>, move |result| {
+                let Ok(file) = result else { return };
+                let Some(path) = file.path() else { return };
+
+                remember_data_path(&path);
+                if path.exists() {
+                    super::state::set_data_path(&state, path.clone());
+                    if let Err(err) = super::state::reload(&state) {
+                        state.borrow_mut().load_blocked = true;
+                        eprintln!("skrizhal: failed to load chosen data file: {err}");
+                    }
+                } else {
+                    super::state::start_new_file(&state, path.clone());
+                    if let Err(err) = super::state::persist(&state) {
+                        eprintln!("skrizhal: failed to create new file: {err}");
+                    }
+                }
+                path_row.set_subtitle(&path.display().to_string());
+                on_change(None);
+            });
+        });
+    }
+
+    dialog.present();
 }

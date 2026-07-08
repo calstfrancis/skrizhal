@@ -91,8 +91,8 @@ pub fn validate_yaml_text(yaml: &str) -> Vec<Warning> {
 /// and entry-level (unknown category, missing fields) checks in one call.
 pub fn validate_all(yaml: &str) -> Result<Vec<Warning>, LoadError> {
     let mut warnings = validate_yaml_text(yaml);
-    let entries = parse_str(yaml)?;
-    warnings.extend(validate_entries(&entries));
+    let outcome = parse_str(yaml)?;
+    warnings.extend(validate_entries(&outcome.entries));
     Ok(warnings)
 }
 
@@ -107,7 +107,7 @@ mystery:
   category: Not A Real Category
   title: Something
 "#;
-        let entries = parse_str(yaml).unwrap();
+        let entries = parse_str(yaml).unwrap().entries;
         let warnings = validate_entries(&entries);
         assert!(warnings.contains(&Warning::UnknownCategory {
             key: "mystery".into(),
@@ -122,7 +122,7 @@ bare-job:
   category: Employment
   title: Some Job
 "#;
-        let entries = parse_str(yaml).unwrap();
+        let entries = parse_str(yaml).unwrap().entries;
         let warnings = validate_entries(&entries);
         assert!(warnings.contains(&Warning::MissingRecommendedField {
             key: "bare-job".into(),
@@ -145,7 +145,7 @@ complete-job:
   date: 2020-01/2021-01
   description: Did things
 "#;
-        let entries = parse_str(yaml).unwrap();
+        let entries = parse_str(yaml).unwrap().entries;
         assert!(validate_entries(&entries).is_empty());
     }
 
@@ -159,7 +159,7 @@ mdiv-2024:
   date: 2023/
   degree: MDiv
 "#;
-        let entries = parse_str(yaml).unwrap();
+        let entries = parse_str(yaml).unwrap().entries;
         let warnings = validate_entries(&entries);
         assert!(!warnings.iter().any(|w| matches!(
             w,

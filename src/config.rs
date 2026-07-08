@@ -22,8 +22,11 @@ impl Default for Config {
     }
 }
 
+/// Defaults to Zerkalo's own default work directory — Skrizhal's CV element
+/// database is meant to be found there by Zerkalo's CV mode. Fully
+/// user-configurable via Preferences; this is only the first-run default.
 fn default_data_path() -> PathBuf {
-    PathBuf::from(shellexpand::tilde("~/.local/share/skrizhal/cv-elements.yaml").into_owned())
+    PathBuf::from(shellexpand::tilde("~/Documents/Zerkalo/cv-elements.yaml").into_owned())
 }
 
 fn config_file() -> PathBuf {

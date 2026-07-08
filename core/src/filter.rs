@@ -70,7 +70,7 @@ ssrhc-award:
 
     #[test]
     fn filter_by_category() {
-        let entries = parse_str(SAMPLE).unwrap();
+        let entries = parse_str(SAMPLE).unwrap().entries;
         let opts = FilterOptions {
             category: Some("Education"),
             ..Default::default()
@@ -82,7 +82,7 @@ ssrhc-award:
 
     #[test]
     fn filter_by_tag() {
-        let entries = parse_str(SAMPLE).unwrap();
+        let entries = parse_str(SAMPLE).unwrap().entries;
         let opts = FilterOptions {
             tag: Some("ministry"),
             ..Default::default()
@@ -95,7 +95,7 @@ ssrhc-award:
 
     #[test]
     fn filter_by_query_matches_organization() {
-        let entries = parse_str(SAMPLE).unwrap();
+        let entries = parse_str(SAMPLE).unwrap().entries;
         let opts = FilterOptions {
             query: Some("atlantic"),
             ..Default::default()
@@ -107,7 +107,7 @@ ssrhc-award:
 
     #[test]
     fn filter_combines_criteria_with_and() {
-        let entries = parse_str(SAMPLE).unwrap();
+        let entries = parse_str(SAMPLE).unwrap().entries;
         let opts = FilterOptions {
             tag: Some("academic"),
             category: Some("Award"),
@@ -120,7 +120,7 @@ ssrhc-award:
 
     #[test]
     fn no_criteria_returns_everything() {
-        let entries = parse_str(SAMPLE).unwrap();
+        let entries = parse_str(SAMPLE).unwrap().entries;
         let result = filter_entries(&entries, &FilterOptions::default());
         assert_eq!(result.len(), entries.len());
     }

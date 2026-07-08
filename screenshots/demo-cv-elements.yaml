@@ -1,0 +1,26 @@
+example-job-2025:
+  category: Employment
+  title: Example Position
+  organization: Example Organization
+  location: Example City, XX
+  date: 2024-01/2025-06
+  tags: [example, current]
+  description:
+    - Sample responsibility for illustration purposes
+    - Another sample responsibility
+
+example-degree-2023:
+  category: Education
+  title: Example Degree
+  organization: Example University
+  date: 2021/2023
+  tags: [example]
+  degree: Example Degree
+  field-of-study: Example Field
+
+example-award-2022:
+  category: Award
+  title: Example Award
+  organization: Example Awarding Body
+  date: '2022'
+  tags: [example]

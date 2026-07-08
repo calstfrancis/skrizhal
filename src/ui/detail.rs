@@ -389,7 +389,8 @@ pub fn load_entry(widgets: &DetailWidgets, entry: &CvEntry, is_new: bool) {
         add_extra_row(&widgets.extra_list, &widgets.extra_rows, k, &value_str);
     }
 
-    let raw = skrizhal_core::to_yaml_string(std::slice::from_ref(entry)).unwrap_or_default();
+    let raw = skrizhal_core::to_yaml_string(std::slice::from_ref(entry), &Default::default())
+        .unwrap_or_default();
     set_text_of(&widgets.raw_view, &raw);
 
     update_warnings(widgets, entry);
@@ -469,7 +470,11 @@ pub fn read_form(widgets: &DetailWidgets) -> CvEntry {
 /// Parses the raw-YAML pane's text, expecting exactly one entry.
 pub fn read_raw(widgets: &DetailWidgets) -> Result<CvEntry, String> {
     let text = text_of(&widgets.raw_view);
-    let mut entries = skrizhal_core::parse_str(&text).map_err(|e| e.to_string())?;
+    let outcome = skrizhal_core::parse_str(&text).map_err(|e| e.to_string())?;
+    if let Some((key, err)) = outcome.failed.first() {
+        return Err(format!("{key}: {err}"));
+    }
+    let mut entries = outcome.entries;
     match entries.len() {
         1 => Ok(entries.remove(0)),
         0 => Err("No entry found — expected one top-level key.".to_string()),

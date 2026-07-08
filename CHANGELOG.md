@@ -5,6 +5,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.3.1-dev1] — New File/Open/Save As/Preferences, parse-crash fix, changelog & spreadsheet polish
+
+### Changed
+- **Changelog window** — the Markdown-to-Pango converter now folds a bullet's hard-wrapped
+  source lines (CHANGELOG.md wraps prose at ~90 columns for editor readability) into one
+  paragraph that reflows to the dialog's actual width, instead of keeping the source file's
+  arbitrary line breaks (previously every wrapped line became its own short, ragged line).
+  Added `#`-level heading support (the top `# Changelog` title rendered as literal text before),
+  underlined section headings (`### Added`/`Fixed`/`Changed`) so they read as a distinct
+  hierarchy from inline `**bold**` text rather than the same weight, and wrapped the content in
+  an `Adw.Clamp` so prose stays a comfortable reading width if the window is resized wider.
+- **Spreadsheet view** — columns had no minimum width and mostly showed truncated text
+  ("Example Organiz…", "Example Awarding…"); each column now has a sensible per-column minimum
+  (wider for Title/Organization, narrower for Date/Tags). Added a bottom border under the header
+  row so it reads clearly as a header, and subtle alternating row shading for readability. The
+  fill-handle (drag-to-copy) square previously overlapped the last character or two of cell
+  text; cells now leave a small margin so the handle sits clear of the text.
+
+### Added
+- **New File**, **Open**, **Save As**, and **Preferences** in the header menu — the data file
+  location was previously only changeable via "Choose Data File…" (an open-existing-file picker
+  with no way to create a fresh file or explicitly re-save elsewhere). Preferences shows the
+  current path and a "Change…" button that works for both switching to an existing file or
+  starting a new one at a chosen location.
+- Default data file location is now `~/Documents/Zerkalo/cv-elements.yaml` (previously
+  `~/.local/share/skrizhal/cv-elements.yaml`) — Zerkalo's CV mode looks for the file there, and it
+  keeps CV data next to the documents that reference it instead of tucked away in a data directory
+  nobody browses.
+
+### Fixed
+- **A file with even one entry missing a required field (`category`/`title`) used to fail to load
+  entirely**, dropping every other entry in the file into a read-only, unsaveable state. Parsing
+  is now per-entry: a malformed entry is skipped (with a toast naming which key and why) while
+  every other entry loads and stays fully editable. The malformed entry's raw YAML is preserved
+  unchanged on every subsequent save, so nothing is silently deleted just because Skrizhal
+  couldn't understand it — only a genuinely broken YAML file (bad syntax) still blocks loading
+  entirely, same as before.
+- **Old files using `type:` instead of `category:`** (the field's name before an early rename,
+  documented in `plan.md`) now load correctly — `type` is accepted as an alias for `category`.
+  This was the specific cause of "can't parse the file that was open previously" for any file
+  written before that rename.
+- Fixed a bug introduced partway through today's work, before it ever shipped: the per-entry
+  parsing above initially used `from_value` on already-generically-parsed YAML, which is stricter
+  about scalar types than parsing straight from text — an unquoted `date: 2020` (a YAML integer)
+  was silently rejected instead of coerced to a string, which would have dropped any entry with a
+  bare numeric date. Fixed by round-tripping each entry through YAML text before typed parsing,
+  restoring the original lenient behavior. Added a regression test.
+
+- Flatpak build was broken — `gtk4`/`libadwaita`/`glib` had drifted to versions (0.11.4/0.9.2/0.22.8)
+  requiring rustc 1.92+, but the `org.gnome.Platform//50` runtime's `rust-stable` SDK extension
+  only provides rustc 1.89. Flatpak has no way to pin an SDK extension to a different branch than
+  the runtime, so the fix is downgrading to the same versions Zerkalo already uses successfully
+  in this exact setup (`gtk4 = "0.7"`, `libadwaita = "0.5"`, `glib = "0.18"`) rather than chasing
+  a newer runtime. Regenerated `packaging/cargo-sources.json` accordingly. No UI code changes were
+  needed — it compiled clean against the older API on the first try.
+
+---
+
 ## [0.3.0] "Full Ledger" — auto-generated keys, categories, field guide, spreadsheet view
 
 ### Changed

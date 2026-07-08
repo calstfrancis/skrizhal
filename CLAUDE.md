@@ -68,11 +68,20 @@ documentation policy.
   deps module's stub-build step stubs *both* `src/main.rs` and `core/src/lib.rs` (and its source
   list includes `core/Cargo.toml`, since the workspace won't resolve without it) — remember both
   halves if this ever needs touching again.
-- Runtime: `org.gnome.Platform`//`50` with the `rust-stable` SDK extension. Needs the 25.08
-  branch specifically (rustc 1.96.1) — the 48/24.08 branch only ships rustc 1.89, which is too
-  old for current gtk4-rs/libadwaita-rs (they need 1.92+). Re-check this pairing before bumping
-  `gtk4`/`libadwaita` crate versions in the future; a newer crate release could raise the MSRV
-  again.
+- Runtime: `org.gnome.Platform`//`50` with the plain `rust-stable` SDK extension (unpinned —
+  it resolves to whatever branch matches the runtime, currently rustc 1.89 on the 24.08 branch).
+  **`gtk4`/`libadwaita`/`glib` are deliberately pinned to the same versions Zerkalo uses**
+  (`gtk4 = "0.7"`, `libadwaita = "0.5"`, `glib = "0.18"`) specifically so they stay compatible
+  with rustc 1.89 — newer gtk4-rs releases (0.9+) raise the MSRV to 1.92+, which the GNOME 50
+  runtime's SDK extension can't provide. This bit us once: an earlier version of this project
+  used gtk4 0.11.4/glib 0.22.8, which built fine locally (system rustc is newer) but failed in
+  the flatpak sandbox with "rustc 1.89.0 is not supported by the following packages." Flatpak's
+  `sdk-extensions` manifest field has no way to pin an extension to a branch other than the
+  one matching the runtime (flatpak-builder 1.4.8 silently ignores any `//branch` suffix and
+  resolves it anyway) — so bumping gtk4-rs past the current pins means either waiting for a
+  GNOME runtime built on a newer freedesktop-sdk branch, or re-vendoring against a plain
+  `org.freedesktop.Platform`/`Sdk` base instead of `org.gnome.*`. Re-check this before ever
+  bumping `gtk4`/`libadwaita`/`glib` versions.
 - `packaging/cargo-sources.json` vendors all crates.io dependencies for the offline flatpak
   build. Regenerate it whenever `Cargo.lock` changes:
   `python3 flatpak-cargo-generator.py Cargo.lock -o packaging/cargo-sources.json` (script from

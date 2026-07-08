@@ -57,7 +57,7 @@ c:
 
     #[test]
     fn counts_are_correct() {
-        let entries = parse_str(SAMPLE).unwrap();
+        let entries = parse_str(SAMPLE).unwrap().entries;
         let counts = all_tags_with_counts(&entries);
         assert_eq!(
             counts,
@@ -71,7 +71,7 @@ c:
 
     #[test]
     fn rename_updates_all_matching_entries() {
-        let mut entries = parse_str(SAMPLE).unwrap();
+        let mut entries = parse_str(SAMPLE).unwrap().entries;
         let changed = rename_tag(&mut entries, "ministry", "church");
         assert_eq!(changed, 2);
         let a = entries.iter().find(|e| e.key == "a").unwrap();
@@ -80,7 +80,7 @@ c:
 
     #[test]
     fn rename_onto_existing_tag_merges_and_dedupes() {
-        let mut entries = parse_str(SAMPLE).unwrap();
+        let mut entries = parse_str(SAMPLE).unwrap().entries;
         rename_tag(&mut entries, "ministry", "academic");
         let b = entries.iter().find(|e| e.key == "b").unwrap();
         // was [ministry, academic] -> both become "academic" -> deduped to one
@@ -89,14 +89,14 @@ c:
 
     #[test]
     fn rename_nonexistent_tag_changes_nothing() {
-        let mut entries = parse_str(SAMPLE).unwrap();
+        let mut entries = parse_str(SAMPLE).unwrap().entries;
         let changed = rename_tag(&mut entries, "not-a-tag", "whatever");
         assert_eq!(changed, 0);
     }
 
     #[test]
     fn rename_to_same_name_is_noop() {
-        let mut entries = parse_str(SAMPLE).unwrap();
+        let mut entries = parse_str(SAMPLE).unwrap().entries;
         let changed = rename_tag(&mut entries, "ministry", "ministry");
         assert_eq!(changed, 0);
     }

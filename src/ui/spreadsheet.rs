@@ -16,9 +16,16 @@ type ColumnSetter = Rc<dyn Fn(&mut CvEntry, &str)>;
 #[derive(Clone)]
 struct ColumnSpec {
     label: &'static str,
+    /// Minimum width in characters — chosen per column so typical content
+    /// (a title, an organization name, a `YYYY-MM/YYYY-MM` range) fits
+    /// without truncating; columns still grow further if the window is
+    /// wider than the sum of these minimums.
+    width_chars: i32,
     get: Rc<dyn Fn(&CvEntry) -> String>,
     set: ColumnSetter,
 }
+
+const KEY_WIDTH_CHARS: i32 = 20;
 
 fn column_specs() -> Vec<ColumnSpec> {
     fn opt(v: &str) -> Option<String> {
@@ -32,31 +39,37 @@ fn column_specs() -> Vec<ColumnSpec> {
     vec![
         ColumnSpec {
             label: "Category",
+            width_chars: 14,
             get: Rc::new(|e| e.category.clone()),
             set: Rc::new(|e, v| e.category = v.trim().to_string()),
         },
         ColumnSpec {
             label: "Title",
+            width_chars: 24,
             get: Rc::new(|e| e.title.clone()),
             set: Rc::new(|e, v| e.title = v.trim().to_string()),
         },
         ColumnSpec {
             label: "Organization",
+            width_chars: 24,
             get: Rc::new(|e| e.organization.clone().unwrap_or_default()),
             set: Rc::new(|e, v| e.organization = opt(v)),
         },
         ColumnSpec {
             label: "Location",
+            width_chars: 16,
             get: Rc::new(|e| e.location.clone().unwrap_or_default()),
             set: Rc::new(|e, v| e.location = opt(v)),
         },
         ColumnSpec {
             label: "Date",
+            width_chars: 16,
             get: Rc::new(|e| e.date.clone().unwrap_or_default()),
             set: Rc::new(|e, v| e.date = opt(v)),
         },
         ColumnSpec {
             label: "Tags",
+            width_chars: 18,
             get: Rc::new(|e| e.tags.join(", ")),
             set: Rc::new(|e, v| {
                 e.tags = v
@@ -95,6 +108,13 @@ const FILL_HANDLE_CSS: &str = "
 .skrizhal-fill-preview {
     background-color: alpha(@accent_bg_color, 0.25);
 }
+.skrizhal-sheet-header {
+    padding-bottom: 6px;
+    border-bottom: 2px solid alpha(@window_fg_color, 0.15);
+}
+entry.skrizhal-sheet-row-even {
+    background-color: alpha(@window_fg_color, 0.06);
+}
 ";
 
 pub fn build() -> SpreadsheetWidgets {
@@ -109,20 +129,27 @@ pub fn build() -> SpreadsheetWidgets {
     }
 
     let grid = gtk4::Grid::new();
-    grid.set_row_spacing(2);
-    grid.set_column_spacing(6);
+    grid.set_hexpand(true);
+    grid.set_row_spacing(4);
+    grid.set_column_spacing(10);
     grid.set_margin_top(8);
-    grid.set_margin_bottom(8);
-    grid.set_margin_start(8);
-    grid.set_margin_end(8);
+    grid.set_margin_bottom(12);
+    grid.set_margin_start(12);
+    grid.set_margin_end(12);
 
-    let key_header = gtk4::Label::builder().label("Key").css_classes(["heading"]).xalign(0.0).build();
+    let key_header = gtk4::Label::builder()
+        .label("Key")
+        .css_classes(["heading", "skrizhal-sheet-header"])
+        .xalign(0.0)
+        .width_chars(KEY_WIDTH_CHARS)
+        .build();
     grid.attach(&key_header, 0, 0, 1, 1);
     for (i, spec) in column_specs().iter().enumerate() {
         let header = gtk4::Label::builder()
             .label(spec.label)
-            .css_classes(["heading"])
+            .css_classes(["heading", "skrizhal-sheet-header"])
             .xalign(0.0)
+            .width_chars(spec.width_chars)
             .build();
         grid.attach(&header, (i + 1) as i32, 0, 1, 1);
     }
@@ -137,8 +164,12 @@ pub fn build() -> SpreadsheetWidgets {
     }
 }
 
-fn make_cell(initial: &str) -> gtk4::Entry {
-    gtk4::Entry::builder().text(initial).hexpand(true).build()
+fn make_cell(initial: &str, width_chars: i32) -> gtk4::Entry {
+    gtk4::Entry::builder()
+        .text(initial)
+        .hexpand(true)
+        .width_chars(width_chars)
+        .build()
 }
 
 /// Wires Enter and focus-out to call `commit` with the entry's current text.
@@ -189,7 +220,10 @@ pub fn refresh(
         let grid_row = (row_idx + 1) as i32;
         let key_rc = Rc::new(RefCell::new(entry.key.clone()));
 
-        let key_entry = make_cell(&entry.key);
+        let key_entry = make_cell(&entry.key, KEY_WIDTH_CHARS);
+        if row_idx % 2 == 1 {
+            key_entry.add_css_class("skrizhal-sheet-row-even");
+        }
         widgets.grid.attach(&key_entry, 0, grid_row, 1, 1);
         widgets.data_widgets.borrow_mut().push(key_entry.clone().upcast());
         {
@@ -232,13 +266,20 @@ pub fn refresh(
         for (col_idx, spec) in specs.iter().enumerate() {
             let value = (spec.get)(entry);
             let overlay = gtk4::Overlay::new();
-            let cell_entry = make_cell(&value);
+            let cell_entry = make_cell(&value, spec.width_chars);
+            // Leave room at the end so the fill handle sits clear of the
+            // text instead of overlapping the last character or two.
+            cell_entry.set_margin_end(12);
+            if row_idx % 2 == 1 {
+                cell_entry.add_css_class("skrizhal-sheet-row-even");
+            }
             overlay.set_child(Some(&cell_entry));
 
             let handle = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
             handle.add_css_class("skrizhal-fill-handle");
             handle.set_halign(gtk4::Align::End);
             handle.set_valign(gtk4::Align::End);
+            handle.set_margin_bottom(3);
             handle.set_cursor(gtk4::gdk::Cursor::from_name("crosshair", None).as_ref());
             overlay.add_overlay(&handle);
 

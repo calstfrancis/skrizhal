@@ -93,25 +93,41 @@ pub fn build(app: &adw::Application) {
         .build();
     let menu_popover = gtk4::Popover::new();
     let menu_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    let manage_tags_btn = gtk4::Button::builder()
-        .label("Manage Tags…")
+    let new_file_btn = gtk4::Button::builder()
+        .label("New File…")
         .css_classes(["flat"])
         .build();
     let choose_file_btn = gtk4::Button::builder()
-        .label("Choose Data File…")
+        .label("Open…")
+        .css_classes(["flat"])
+        .build();
+    let save_as_btn = gtk4::Button::builder()
+        .label("Save As…")
         .css_classes(["flat"])
         .build();
     let reload_btn = gtk4::Button::builder()
         .label("Reload from Disk")
         .css_classes(["flat"])
         .build();
+    let manage_tags_btn = gtk4::Button::builder()
+        .label("Manage Tags…")
+        .css_classes(["flat"])
+        .build();
+    let preferences_btn = gtk4::Button::builder()
+        .label("Preferences…")
+        .css_classes(["flat"])
+        .build();
     let field_guide_btn = gtk4::Button::builder()
         .label("Field Guide…")
         .css_classes(["flat"])
         .build();
-    menu_box.append(&manage_tags_btn);
+    menu_box.append(&new_file_btn);
     menu_box.append(&choose_file_btn);
+    menu_box.append(&save_as_btn);
     menu_box.append(&reload_btn);
+    menu_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
+    menu_box.append(&manage_tags_btn);
+    menu_box.append(&preferences_btn);
     menu_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
     menu_box.append(&field_guide_btn);
     menu_popover.set_child(Some(&menu_box));
@@ -423,6 +439,20 @@ pub fn build(app: &adw::Application) {
         let state = state.clone();
         let on_change_cell = on_change_cell.clone();
         let popover = menu_popover.clone();
+        new_file_btn.connect_clicked(move |_| {
+            popover.popdown();
+            let cb = on_change_cell
+                .borrow()
+                .clone()
+                .expect("on_change_cell set before first use");
+            dialogs::new_file(&window, &state, &cb);
+        });
+    }
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let on_change_cell = on_change_cell.clone();
+        let popover = menu_popover.clone();
         choose_file_btn.connect_clicked(move |_| {
             popover.popdown();
             let cb = on_change_cell
@@ -430,6 +460,34 @@ pub fn build(app: &adw::Application) {
                 .clone()
                 .expect("on_change_cell set before first use");
             dialogs::choose_data_file(&window, &state, &cb);
+        });
+    }
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let on_change_cell = on_change_cell.clone();
+        let popover = menu_popover.clone();
+        save_as_btn.connect_clicked(move |_| {
+            popover.popdown();
+            let cb = on_change_cell
+                .borrow()
+                .clone()
+                .expect("on_change_cell set before first use");
+            dialogs::save_as(&window, &state, &cb);
+        });
+    }
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let on_change_cell = on_change_cell.clone();
+        let popover = menu_popover.clone();
+        preferences_btn.connect_clicked(move |_| {
+            popover.popdown();
+            let cb = on_change_cell
+                .borrow()
+                .clone()
+                .expect("on_change_cell set before first use");
+            dialogs::show_preferences(&window, &state, &cb);
         });
     }
     {
@@ -454,7 +512,14 @@ pub fn build(app: &adw::Application) {
                         .clone()
                         .expect("on_change_cell set before first use");
                     cb(None);
-                    toast_overlay.add_toast(adw::Toast::new("Reloaded from disk."));
+                    match state::parse_warnings_summary(&state.borrow().parse_warnings) {
+                        Some(summary) => {
+                            let toast = adw::Toast::new(&summary);
+                            toast.set_timeout(0);
+                            toast_overlay.add_toast(toast);
+                        }
+                        None => toast_overlay.add_toast(adw::Toast::new("Reloaded from disk.")),
+                    }
                 }
                 Err(err) => {
                     toast_overlay.add_toast(adw::Toast::new(&format!("Reload failed: {err}")));
@@ -468,6 +533,10 @@ pub fn build(app: &adw::Application) {
         toast_overlay.add_toast(adw::Toast::new(&format!(
             "Couldn't parse the data file, starting read-only: {err}"
         )));
+    } else if let Some(summary) = state::parse_warnings_summary(&state.borrow().parse_warnings) {
+        let toast = adw::Toast::new(&summary);
+        toast.set_timeout(0);
+        toast_overlay.add_toast(toast);
     }
     sidebar::refresh_tag_filter_options(&sidebar_widgets, &state);
     sidebar::refresh_list(&sidebar_widgets, &state, &on_change);
