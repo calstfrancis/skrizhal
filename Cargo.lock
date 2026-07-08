@@ -790,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "skrizhal"
-version = "0.3.1-dev2"
+version = "0.3.1-dev4"
 dependencies = [
  "glib",
  "gtk4",
@@ -806,7 +806,7 @@ dependencies = [
 
 [[package]]
 name = "skrizhal-core"
-version = "0.3.1-dev2"
+version = "0.3.1-dev4"
 dependencies = [
  "serde",
  "serde_yaml_ng",

@@ -103,7 +103,7 @@ documentation policy.
 **GUI (root `src/`, package `skrizhal`):**
 - `config.rs` — `~/.config/skrizhal/config.toml` (data file path, field-guide-seen flag)
 - `ui/state.rs` — shared `AppState` + the `ChangeCallback` that persists + refreshes after any mutation
-- `ui/sidebar.rs`, `ui/detail.rs`, `ui/dialogs.rs`, `ui/spreadsheet.rs`, `ui/field_guide.rs`,
+- `ui/sidebar.rs`, `ui/detail.rs`, `ui/dialogs.rs`, `ui/field_guide.rs`,
   `ui/changelog.rs`, `ui/app_window.rs`
 
 Parses CV YAML with plain `serde_yaml_ng` against `skrizhal-core`'s own schema — deliberately

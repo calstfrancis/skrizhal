@@ -12,7 +12,6 @@ use super::detail;
 use super::dialogs;
 use super::field_guide;
 use super::sidebar;
-use super::spreadsheet;
 use super::state::{self, ChangeCallback, SharedState};
 use crate::config::Config;
 
@@ -64,15 +63,7 @@ pub fn build(app: &adw::Application) {
     paned.set_shrink_start_child(false);
     paned.set_position(320);
 
-    let spreadsheet_widgets = spreadsheet::build();
-    // Nested inside toast_overlay (not the other way around) so toasts from
-    // either view — including spreadsheet cell/key validation errors — stay
-    // visible no matter which one is active.
-    let main_view_stack = gtk4::Stack::new();
-    main_view_stack.add_named(&paned, Some("browse"));
-    main_view_stack.add_named(&spreadsheet_widgets.root, Some("spreadsheet"));
-    main_view_stack.set_visible_child_name("browse");
-    toast_overlay.set_child(Some(&main_view_stack));
+    toast_overlay.set_child(Some(&paned));
 
     // ── Header bar ───────────────────────────────────────────────────
     let header = adw::HeaderBar::new();
@@ -153,12 +144,6 @@ pub fn build(app: &adw::Application) {
     status_bar.set_margin_end(10);
     status_bar.set_margin_top(4);
     status_bar.set_margin_bottom(4);
-
-    let spreadsheet_toggle = gtk4::ToggleButton::builder()
-        .label("Spreadsheet")
-        .css_classes(["flat"])
-        .build();
-    status_bar.append(&spreadsheet_toggle);
 
     let status_spacer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     status_spacer.set_hexpand(true);
@@ -262,33 +247,6 @@ pub fn build(app: &adw::Application) {
             glib::Propagation::Proceed
         });
         window.add_controller(key_controller);
-    }
-
-    // ── Spreadsheet toggle: swaps the main view; refreshes on the way in
-    // so it reflects whatever changed while it was hidden. ──
-    {
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let toast_overlay = toast_overlay.clone();
-        let main_view_stack = main_view_stack.clone();
-        let spreadsheet_widgets = spreadsheet_widgets.clone();
-        spreadsheet_toggle.connect_toggled(move |btn| {
-            if btn.is_active() {
-                spreadsheet::refresh(&spreadsheet_widgets, &state, &on_change, &toast_overlay);
-                main_view_stack.set_visible_child_name("spreadsheet");
-            } else {
-                main_view_stack.set_visible_child_name("browse");
-            }
-        });
-    }
-    {
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let toast_overlay = toast_overlay.clone();
-        let spreadsheet_widgets = spreadsheet_widgets.clone();
-        spreadsheet_widgets.add_row_button.clone().connect_clicked(move |_| {
-            spreadsheet::add_row(&spreadsheet_widgets, &state, &on_change, &toast_overlay);
-        });
     }
 
     // ── Filter/search changes: refresh the view without touching disk ──

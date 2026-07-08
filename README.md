@@ -14,8 +14,8 @@ See [`plan.md`](plan.md) for the full architecture and phased build plan.
 ## Status
 
 **Phase 2 complete, Phase 3a underway.** The editor app is fully usable — browse, add, edit,
-duplicate, and delete CV entries; toggle to raw YAML per entry; manage tags; bulk-edit via a
-spreadsheet view. The workspace was just split into `skrizhal-core` (lib, no GTK) + `skrizhal`
+duplicate, and delete CV entries; toggle to raw YAML per entry; manage tags. The workspace was
+just split into `skrizhal-core` (lib, no GTK) + `skrizhal`
 (GUI bin) specifically so Zerkalo can depend on the core crate without pulling in a second,
 incompatible copy of GTK4/libadwaita. Next: `cv_elements_path` config + a `cv-helpers.typ` Typst
 helper in Zerkalo (Phase 3a), then `!`-triggered autocomplete in the editor (Phase 3b).
@@ -59,9 +59,7 @@ No GTK/libadwaita dependency — just `serde`/`serde_yaml_ng`/`thiserror` — so
 - Manage Tags dialog: rename a tag everywhere at once; renaming onto an existing tag name merges
   the two.
 - Field Guide: shown on first run, reachable afterward via the header menu.
-- Status bar: Spreadsheet toggle (a full editable grid — Key/Category/Title/Organization/
-  Location/Date/Tags — with drag-to-fill on every column but Key) and a version button that opens
-  the changelog.
+- Status bar: a version button that opens the changelog.
 - Data file location is configurable (`~/.config/skrizhal/config.toml` or "Choose Data File…"),
   and a data file that fails to parse blocks saving rather than risking a silent overwrite.
 

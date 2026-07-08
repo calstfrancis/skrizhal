@@ -58,8 +58,7 @@ fn empty_state(data_path: PathBuf) -> AppState {
 
 /// Snapshots the current entries onto the undo stack and clears redo —
 /// call this immediately before mutating `entries` at any call site (add,
-/// edit, duplicate, delete, tag rename, spreadsheet cell/fill-drag/key
-/// rename). Every mutation site is responsible for calling this itself;
+/// edit, duplicate, delete, tag rename). Every mutation site is responsible for calling this itself;
 /// there's no single choke point to hook automatically since callers mutate
 /// `state.borrow_mut().entries` directly rather than going through a shared
 /// mutation function.

@@ -5,27 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.1-dev3] — Undo/redo, spreadsheet keyboard navigation, New File/Open/Save As/Preferences
+## [0.3.1-dev4] — Undo/redo, New File/Open/Save As/Preferences
 
-### Fixed
-- **Freeze when adding a new row in spreadsheet mode** — `sidebar::refresh_list` held a live
-  `state.borrow()` across the entire row-rebuild loop while appending/removing `ListBox` rows;
-  GTK firing `row-selected` as a side effect of that churn re-entered the same `RefCell` via the
-  selection handler, panicking across the glib FFI boundary in a way that presented as a hang.
-  `refresh_list` now clones the filtered entries into an owned `Vec` before touching the
-  `ListBox`, so the borrow is dropped before any signal can fire.
+### Removed
+- **Spreadsheet mode** — the bulk-edit grid view (toggle, `ui/spreadsheet.rs`, and every
+  cell/fill-drag/keyboard-nav path built around it) has been removed. It never fully replaced
+  what it was meant to (bulk data entry), and its "add row" flow caused a freeze — a
+  `RefCell` re-entrancy where `sidebar::refresh_list` held a live borrow across a `ListBox`
+  rebuild loop that GTK's own `row-selected` signal, fired mid-rebuild, tried to re-borrow.
+  Rather than keep patching a view nobody was getting value from, it's gone; entries are added
+  and edited one at a time through the sidebar + detail pane.
 
 ### Added
 - **Undo/redo** — Ctrl+Z / Ctrl+Shift+Z (and header-bar buttons) revert or replay the last 50
-  changes, covering every mutation: add, edit, duplicate, delete, tag rename, and every
-  spreadsheet edit (cell, key rename, fill-drag). The delete confirmation dialog now says "You
-  can undo this with Ctrl+Z" instead of "This can't be undone."
-- **Spreadsheet keyboard navigation** — Tab commits the current cell and moves to the next one
-  (wrapping to the next row's Key cell at the end of a row), replacing reliance on GTK's default
-  focus chain, which didn't survive `refresh()` rebuilding every cell as a new widget mid-edit.
-  Enter commits and, on the last row, appends a new blank row and focuses its Key cell — mirrors
-  normal spreadsheet "type, Enter, keep going" data entry. A new "+ Add Row" toolbar button above
-  the grid does the same thing on click.
+  changes, covering every mutation: add, edit, duplicate, delete, tag rename. The delete
+  confirmation dialog now says "You can undo this with Ctrl+Z" instead of "This can't be
+  undone."
 
 ### Changed
 - **Changelog window** — the Markdown-to-Pango converter now folds a bullet's hard-wrapped
@@ -36,12 +31,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   underlined section headings (`### Added`/`Fixed`/`Changed`) so they read as a distinct
   hierarchy from inline `**bold**` text rather than the same weight, and wrapped the content in
   an `Adw.Clamp` so prose stays a comfortable reading width if the window is resized wider.
-- **Spreadsheet view** — columns had no minimum width and mostly showed truncated text
-  ("Example Organiz…", "Example Awarding…"); each column now has a sensible per-column minimum
-  (wider for Title/Organization, narrower for Date/Tags). Added a bottom border under the header
-  row so it reads clearly as a header, and subtle alternating row shading for readability. The
-  fill-handle (drag-to-copy) square previously overlapped the last character or two of cell
-  text; cells now leave a small margin so the handle sits clear of the text.
 
 ### Added
 - **New File**, **Open**, **Save As**, and **Preferences** in the header menu — the data file
