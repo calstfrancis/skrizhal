@@ -5,7 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.1-dev2] — Undo/redo, spreadsheet keyboard navigation, New File/Open/Save As/Preferences
+## [0.3.1-dev3] — Undo/redo, spreadsheet keyboard navigation, New File/Open/Save As/Preferences
+
+### Fixed
+- **Freeze when adding a new row in spreadsheet mode** — `sidebar::refresh_list` held a live
+  `state.borrow()` across the entire row-rebuild loop while appending/removing `ListBox` rows;
+  GTK firing `row-selected` as a side effect of that churn re-entered the same `RefCell` via the
+  selection handler, panicking across the glib FFI boundary in a way that presented as a hang.
+  `refresh_list` now clones the filtered entries into an owned `Vec` before touching the
+  `ListBox`, so the borrow is dropped before any signal can fire.
 
 ### Added
 - **Undo/redo** — Ctrl+Z / Ctrl+Shift+Z (and header-bar buttons) revert or replay the last 50

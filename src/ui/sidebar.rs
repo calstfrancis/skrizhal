@@ -114,20 +114,22 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
         widgets.list_box.remove(&child);
     }
 
-    let s = state.borrow();
-    let opts = FilterOptions {
-        category: s.filter_category.as_deref(),
-        tag: s.filter_tag.as_deref(),
-        query: if s.search.trim().is_empty() {
-            None
-        } else {
-            Some(s.search.as_str())
-        },
+    let mut matches: Vec<skrizhal_core::CvEntry> = {
+        let s = state.borrow();
+        let opts = FilterOptions {
+            category: s.filter_category.as_deref(),
+            tag: s.filter_tag.as_deref(),
+            query: if s.search.trim().is_empty() {
+                None
+            } else {
+                Some(s.search.as_str())
+            },
+        };
+        filter_entries(&s.entries, &opts).into_iter().cloned().collect()
     };
-    let mut matches = filter_entries(&s.entries, &opts);
     matches.sort_by_key(|e| e.title.to_lowercase());
 
-    for entry in matches {
+    for entry in &matches {
         let subtitle_parts: Vec<&str> = [entry.organization.as_deref(), entry.date.as_deref()]
             .into_iter()
             .flatten()
