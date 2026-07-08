@@ -52,6 +52,7 @@ pub fn show_manage_tags_dialog(
             if new_name.is_empty() || new_name == old_tag {
                 return;
             }
+            super::state::push_undo(&state);
             skrizhal_core::rename_tag(&mut state.borrow_mut().entries, &old_tag, &new_name);
             on_change(None);
             dialog_clone.close();

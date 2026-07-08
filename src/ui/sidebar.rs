@@ -170,6 +170,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
             let on_change = on_change.clone();
             duplicate_btn.connect_clicked(move |_| {
                 popover.popdown();
+                super::state::push_undo(&state);
                 let new_key = {
                     let mut s = state.borrow_mut();
                     let Some(idx) = s.entries.iter().position(|e| e.key == key) else {
@@ -196,7 +197,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
                 let dialog = adw::MessageDialog::new(
                     Some(&window),
                     Some(&format!("Delete \"{label}\"?")),
-                    Some("This can't be undone."),
+                    Some("You can undo this with Ctrl+Z."),
                 );
                 dialog.add_response("cancel", "Cancel");
                 dialog.add_response("delete", "Delete");
@@ -208,6 +209,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
                 let on_change = on_change.clone();
                 dialog.connect_response(None, move |dialog, response| {
                     if response == "delete" {
+                        super::state::push_undo(&state);
                         {
                             let mut s = state.borrow_mut();
                             s.entries.retain(|e| e.key != key);

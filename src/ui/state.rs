@@ -24,7 +24,13 @@ pub struct AppState {
     pub search: String,
     pub filter_category: Option<String>,
     pub filter_tag: Option<String>,
+    undo_stack: Vec<Vec<CvEntry>>,
+    redo_stack: Vec<Vec<CvEntry>>,
 }
+
+/// Cap on undo history — snapshots are whole-entries clones, so this bounds
+/// memory use rather than keeping every edit ever made in a session.
+const UNDO_LIMIT: usize = 50;
 
 pub type SharedState = Rc<RefCell<AppState>>;
 
@@ -45,7 +51,61 @@ fn empty_state(data_path: PathBuf) -> AppState {
         search: String::new(),
         filter_category: None,
         filter_tag: None,
+        undo_stack: Vec::new(),
+        redo_stack: Vec::new(),
     }
+}
+
+/// Snapshots the current entries onto the undo stack and clears redo —
+/// call this immediately before mutating `entries` at any call site (add,
+/// edit, duplicate, delete, tag rename, spreadsheet cell/fill-drag/key
+/// rename). Every mutation site is responsible for calling this itself;
+/// there's no single choke point to hook automatically since callers mutate
+/// `state.borrow_mut().entries` directly rather than going through a shared
+/// mutation function.
+pub fn push_undo(state: &SharedState) {
+    let mut s = state.borrow_mut();
+    let snapshot = s.entries.clone();
+    s.undo_stack.push(snapshot);
+    if s.undo_stack.len() > UNDO_LIMIT {
+        s.undo_stack.remove(0);
+    }
+    s.redo_stack.clear();
+}
+
+pub fn can_undo(state: &SharedState) -> bool {
+    !state.borrow().undo_stack.is_empty()
+}
+
+pub fn can_redo(state: &SharedState) -> bool {
+    !state.borrow().redo_stack.is_empty()
+}
+
+/// Restores the previous entries snapshot, if any. Returns whether it did
+/// anything — the caller still needs to persist and refresh the UI. Doesn't
+/// touch `selected_key`; a selection pointing at an entry that no longer
+/// exists post-undo is handled the same way as any other stale selection
+/// (the sidebar refresh clears it when it can't find a matching row).
+pub fn undo(state: &SharedState) -> bool {
+    let mut s = state.borrow_mut();
+    let Some(prev) = s.undo_stack.pop() else {
+        return false;
+    };
+    let current = s.entries.clone();
+    s.redo_stack.push(current);
+    s.entries = prev;
+    true
+}
+
+pub fn redo(state: &SharedState) -> bool {
+    let mut s = state.borrow_mut();
+    let Some(next) = s.redo_stack.pop() else {
+        return false;
+    };
+    let current = s.entries.clone();
+    s.undo_stack.push(current);
+    s.entries = next;
+    true
 }
 
 /// Returns a human-readable summary of `parse_warnings`, if any, suitable
@@ -97,6 +157,8 @@ pub fn reload(state: &SharedState) -> Result<(), String> {
         s.load_blocked = false;
         s.parse_warnings = Vec::new();
         s.raw_failed = BTreeMap::new();
+        s.undo_stack.clear();
+        s.redo_stack.clear();
         return Ok(());
     }
     match skrizhal_core::load_file(&path) {
@@ -106,6 +168,8 @@ pub fn reload(state: &SharedState) -> Result<(), String> {
             s.load_blocked = false;
             s.parse_warnings = outcome.failed;
             s.raw_failed = outcome.raw_failed;
+            s.undo_stack.clear();
+            s.redo_stack.clear();
             Ok(())
         }
         Err(err) => Err(format!("{err}")),

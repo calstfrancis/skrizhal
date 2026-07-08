@@ -5,7 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.3.1-dev1] — New File/Open/Save As/Preferences, parse-crash fix, changelog & spreadsheet polish
+## [0.3.1-dev2] — Undo/redo, spreadsheet keyboard navigation, New File/Open/Save As/Preferences
+
+### Added
+- **Undo/redo** — Ctrl+Z / Ctrl+Shift+Z (and header-bar buttons) revert or replay the last 50
+  changes, covering every mutation: add, edit, duplicate, delete, tag rename, and every
+  spreadsheet edit (cell, key rename, fill-drag). The delete confirmation dialog now says "You
+  can undo this with Ctrl+Z" instead of "This can't be undone."
+- **Spreadsheet keyboard navigation** — Tab commits the current cell and moves to the next one
+  (wrapping to the next row's Key cell at the end of a row), replacing reliance on GTK's default
+  focus chain, which didn't survive `refresh()` rebuilding every cell as a new widget mid-edit.
+  Enter commits and, on the last row, appends a new blank row and focuses its Key cell — mirrors
+  normal spreadsheet "type, Enter, keep going" data entry. A new "+ Add Row" toolbar button above
+  the grid does the same thing on click.
 
 ### Changed
 - **Changelog window** — the Markdown-to-Pango converter now folds a bullet's hard-wrapped

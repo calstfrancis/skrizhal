@@ -84,12 +84,16 @@ fn column_specs() -> Vec<ColumnSpec> {
 
 struct RowWidgets {
     key: Rc<RefCell<String>>,
+    key_entry: gtk4::Entry,
     cell_entries: Vec<gtk4::Entry>,
 }
 
 #[derive(Clone)]
 pub struct SpreadsheetWidgets {
-    pub root: gtk4::ScrolledWindow,
+    /// A Box containing the "+ Add Row" toolbar above the scrollable grid —
+    /// this is what the caller adds to its view stack.
+    pub root: gtk4::Box,
+    pub add_row_button: gtk4::Button,
     grid: gtk4::Grid,
     rows: Rc<RefCell<Vec<RowWidgets>>>,
     /// Exactly the widgets `refresh` has attached for data rows (never the
@@ -154,10 +158,26 @@ pub fn build() -> SpreadsheetWidgets {
         grid.attach(&header, (i + 1) as i32, 0, 1, 1);
     }
 
-    let root = gtk4::ScrolledWindow::builder().vexpand(true).hexpand(true).child(&grid).build();
+    let scrolled = gtk4::ScrolledWindow::builder().vexpand(true).hexpand(true).child(&grid).build();
+
+    let add_row_button = gtk4::Button::builder()
+        .icon_name("list-add-symbolic")
+        .tooltip_text("Add Row")
+        .css_classes(["flat"])
+        .halign(gtk4::Align::Start)
+        .margin_start(8)
+        .margin_top(8)
+        .build();
+    let toolbar = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    toolbar.append(&add_row_button);
+
+    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    root.append(&toolbar);
+    root.append(&scrolled);
 
     SpreadsheetWidgets {
         root,
+        add_row_button,
         grid,
         rows: Rc::new(RefCell::new(Vec::new())),
         data_widgets: Rc::new(RefCell::new(Vec::new())),
@@ -172,18 +192,107 @@ fn make_cell(initial: &str, width_chars: i32) -> gtk4::Entry {
         .build()
 }
 
-/// Wires Enter and focus-out to call `commit` with the entry's current text.
+/// A cell's column: `None` is the Key column, `Some(i)` is `column_specs()[i]`.
+type CellCol = Option<usize>;
+
+/// Wires focus-out (click away, Tab away — Tab's own commit-and-move is
+/// handled separately below, but this is the fallback for e.g. clicking
+/// straight into another row) to call `commit` with the entry's current text.
 fn wire_commit(entry: &gtk4::Entry, commit: impl Fn(String) + 'static + Clone) {
-    {
-        let commit = commit.clone();
-        entry.connect_activate(move |e| commit(e.text().to_string()));
-    }
     let focus = gtk4::EventControllerFocus::new();
     {
         let entry = entry.clone();
         focus.connect_leave(move |_| commit(entry.text().to_string()));
     }
     entry.add_controller(focus);
+}
+
+/// Finds a row's current grid index by key rather than trusting a captured
+/// `row_idx` — editing the Key column can change sort order (rows are
+/// sorted by key), so after a commit-triggered `refresh()` rebuilds the
+/// grid, the row we were just in may no longer be at the same index.
+fn row_index_for_key(rows: &Rc<RefCell<Vec<RowWidgets>>>, key: &str) -> Option<usize> {
+    rows.borrow().iter().position(|r| *r.key.borrow() == key)
+}
+
+/// Focuses the given cell (if it still exists) and selects its text, so
+/// typing immediately replaces the previous value — matches normal
+/// spreadsheet cell-to-cell navigation.
+fn focus_cell(widgets: &SpreadsheetWidgets, row_idx: usize, col: CellCol) {
+    let rows = widgets.rows.borrow();
+    let Some(row) = rows.get(row_idx) else { return };
+    let entry = match col {
+        None => &row.key_entry,
+        Some(idx) => &row.cell_entries[idx],
+    };
+    entry.grab_focus();
+    entry.select_region(0, -1);
+}
+
+/// Where Tab should go next: across the row, then wrapping to the Key cell
+/// of the next row. Returns `None` at the very last cell of the last row —
+/// nothing to move to.
+fn next_tab_position(row: usize, col: CellCol, row_count: usize, col_count: usize) -> Option<(usize, CellCol)> {
+    match col {
+        None if col_count > 0 => Some((row, Some(0))),
+        None => (row + 1 < row_count).then_some((row + 1, None)),
+        Some(idx) if idx + 1 < col_count => Some((row, Some(idx + 1))),
+        Some(_) => (row + 1 < row_count).then_some((row + 1, None)),
+    }
+}
+
+/// Wires Enter and Tab for a spreadsheet cell:
+/// - **Enter** commits the cell. If this row is the last one, that's read as
+///   "I'm done with this entry, give me another" — a new blank row is
+///   appended and focus moves to its Key cell. Otherwise focus just stays
+///   put (the commit's `refresh()` already rebuilt this cell fresh).
+/// - **Tab** commits the cell and moves focus to the next cell — across the
+///   row, then wrapping to the next row's Key cell — instead of relying on
+///   GTK's default focus-chain, which doesn't survive `refresh()` rebuilding
+///   every cell as a new widget instance mid-navigation.
+///
+/// Both re-locate the row by key (`row_index_for_key`) rather than the
+/// `row_idx`/`row_count` captured when this cell was built, since editing
+/// the Key column can reorder rows (sorted by key) as part of the very
+/// commit this triggers.
+fn wire_enter_tab(
+    entry: &gtk4::Entry,
+    widgets: &SpreadsheetWidgets,
+    key_rc: Rc<RefCell<String>>,
+    col: CellCol,
+    col_count: usize,
+    commit: impl Fn(String) + 'static + Clone,
+    add_row: Rc<dyn Fn()>,
+) {
+    let controller = gtk4::EventControllerKey::new();
+    controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    let entry_for_handler = entry.clone();
+    let widgets = widgets.clone();
+    controller.connect_key_pressed(move |_, keyval, _, _| {
+        use gtk4::gdk::Key;
+        let is_enter = keyval == Key::Return || keyval == Key::KP_Enter;
+        let is_tab = keyval == Key::Tab || keyval == Key::ISO_Left_Tab;
+        if !is_enter && !is_tab {
+            return glib::Propagation::Proceed;
+        }
+        commit(entry_for_handler.text().to_string());
+        let key = key_rc.borrow().clone();
+        let row_count = widgets.rows.borrow().len();
+        let Some(row_idx) = row_index_for_key(&widgets.rows, &key) else {
+            return glib::Propagation::Stop;
+        };
+        if is_enter {
+            if row_idx + 1 == row_count {
+                add_row();
+            } else {
+                focus_cell(&widgets, row_idx, col);
+            }
+        } else if let Some((r, c)) = next_tab_position(row_idx, col, row_count, col_count) {
+            focus_cell(&widgets, r, c);
+        }
+        glib::Propagation::Stop
+    });
+    entry.add_controller(controller);
 }
 
 /// Rebuilds every row from `state`, sorted by key. Any commit (direct edit,
@@ -216,6 +325,14 @@ pub fn refresh(
         })
     };
 
+    let add_row_trigger: Rc<dyn Fn()> = {
+        let widgets = widgets.clone();
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let toast_overlay = toast_overlay.clone();
+        Rc::new(move || add_row(&widgets, &state, &on_change, &toast_overlay))
+    };
+
     for (row_idx, entry) in entries.iter().enumerate() {
         let grid_row = (row_idx + 1) as i32;
         let key_rc = Rc::new(RefCell::new(entry.key.clone()));
@@ -226,13 +343,13 @@ pub fn refresh(
         }
         widgets.grid.attach(&key_entry, 0, grid_row, 1, 1);
         widgets.data_widgets.borrow_mut().push(key_entry.clone().upcast());
-        {
+        let commit_key = {
             let state = state.clone();
             let toast_overlay = toast_overlay.clone();
             let recommit = recommit.clone();
             let key_rc = key_rc.clone();
             let key_entry_clone = key_entry.clone();
-            wire_commit(&key_entry, move |new_key| {
+            move |new_key: String| {
                 let new_key = new_key.trim().to_string();
                 let old_key = key_rc.borrow().clone();
                 if new_key == old_key {
@@ -251,6 +368,7 @@ pub fn refresh(
                     )));
                     return;
                 }
+                super::state::push_undo(&state);
                 {
                     let mut s = state.borrow_mut();
                     if let Some(e) = s.entries.iter_mut().find(|e| e.key == old_key) {
@@ -259,8 +377,18 @@ pub fn refresh(
                 }
                 *key_rc.borrow_mut() = new_key;
                 recommit();
-            });
-        }
+            }
+        };
+        wire_commit(&key_entry, commit_key.clone());
+        wire_enter_tab(
+            &key_entry,
+            widgets,
+            key_rc.clone(),
+            None,
+            specs.len(),
+            commit_key,
+            add_row_trigger.clone(),
+        );
 
         let mut cell_entries = Vec::with_capacity(specs.len());
         for (col_idx, spec) in specs.iter().enumerate() {
@@ -283,22 +411,47 @@ pub fn refresh(
             handle.set_cursor(gtk4::gdk::Cursor::from_name("crosshair", None).as_ref());
             overlay.add_overlay(&handle);
 
-            {
+            let commit_cell = {
                 let state = state.clone();
                 let recommit = recommit.clone();
                 let key_rc = key_rc.clone();
                 let spec = spec.clone();
-                wire_commit(&cell_entry, move |value| {
+                move |value: String| {
+                    let key = key_rc.borrow().clone();
+                    // Skip the undo snapshot/refresh entirely if this cell's
+                    // value didn't actually change — otherwise just Tabbing
+                    // or pressing Enter through unedited cells (normal when
+                    // navigating a row) would flood the undo stack with
+                    // no-op entries.
+                    let unchanged = state
+                        .borrow()
+                        .entries
+                        .iter()
+                        .find(|e| e.key == key)
+                        .is_some_and(|e| (spec.get)(e) == value);
+                    if unchanged {
+                        return;
+                    }
+                    super::state::push_undo(&state);
                     {
                         let mut s = state.borrow_mut();
-                        let key = key_rc.borrow().clone();
                         if let Some(e) = s.entries.iter_mut().find(|e| e.key == key) {
                             (spec.set)(e, &value);
                         }
                     }
                     recommit();
-                });
-            }
+                }
+            };
+            wire_commit(&cell_entry, commit_cell.clone());
+            wire_enter_tab(
+                &cell_entry,
+                widgets,
+                key_rc.clone(),
+                Some(col_idx),
+                specs.len(),
+                commit_cell,
+                add_row_trigger.clone(),
+            );
 
             attach_fill_handle(
                 &handle,
@@ -317,8 +470,35 @@ pub fn refresh(
 
         widgets.rows.borrow_mut().push(RowWidgets {
             key: key_rc,
+            key_entry,
             cell_entries,
         });
+    }
+}
+
+/// Appends a new blank entry (unique auto-generated key, otherwise default)
+/// and focuses its Key cell — used by both the "+ Add Row" button and
+/// pressing Enter in the last row.
+pub fn add_row(
+    widgets: &SpreadsheetWidgets,
+    state: &SharedState,
+    on_change: &ChangeCallback,
+    toast_overlay: &adw::ToastOverlay,
+) {
+    super::state::push_undo(state);
+    let new_key = {
+        let mut s = state.borrow_mut();
+        let key = skrizhal_core::unique_key("new-entry", &s.entries);
+        s.entries.push(CvEntry {
+            key: key.clone(),
+            ..Default::default()
+        });
+        key
+    };
+    on_change(Some(new_key.clone()));
+    refresh(widgets, state, on_change, toast_overlay);
+    if let Some(row_idx) = row_index_for_key(&widgets.rows, &new_key) {
+        focus_cell(widgets, row_idx, None);
     }
 }
 
@@ -365,6 +545,7 @@ fn attach_fill_handle(
         let Some(source_row) = rows_ref.get(row_index) else { return };
         let value = source_row.cell_entries[col_index].text().to_string();
 
+        super::state::push_undo(&state);
         {
             let mut s = state.borrow_mut();
             for i in lo..=hi {

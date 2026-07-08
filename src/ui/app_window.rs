@@ -88,6 +88,19 @@ pub fn build(app: &adw::Application) {
     header.pack_start(&sidebar_toggle);
     header.pack_start(&sidebar_widgets.add_button);
 
+    let undo_button = gtk4::Button::builder()
+        .icon_name("edit-undo-symbolic")
+        .tooltip_text("Undo (Ctrl+Z)")
+        .sensitive(false)
+        .build();
+    let redo_button = gtk4::Button::builder()
+        .icon_name("edit-redo-symbolic")
+        .tooltip_text("Redo (Ctrl+Shift+Z)")
+        .sensitive(false)
+        .build();
+    header.pack_start(&undo_button);
+    header.pack_start(&redo_button);
+
     let menu_button = gtk4::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .build();
@@ -180,10 +193,14 @@ pub fn build(app: &adw::Application) {
         let toast_overlay = toast_overlay.clone();
         let on_change_cell = on_change_cell.clone();
         let next_selection_is_new = next_selection_is_new.clone();
+        let undo_button = undo_button.clone();
+        let redo_button = redo_button.clone();
         Rc::new(move |select_key: Option<String>| {
             if let Err(err) = state::persist(&state) {
                 toast_overlay.add_toast(adw::Toast::new(&err));
             }
+            undo_button.set_sensitive(state::can_undo(&state));
+            redo_button.set_sensitive(state::can_redo(&state));
             sidebar::refresh_tag_filter_options(&sidebar_widgets, &state);
             let cb = on_change_cell
                 .borrow()
@@ -203,6 +220,50 @@ pub fn build(app: &adw::Application) {
     };
     *on_change_cell.borrow_mut() = Some(on_change.clone());
 
+    // ── Undo/redo ────────────────────────────────────────────────────
+    {
+        let state = state.clone();
+        let on_change = on_change.clone();
+        undo_button.connect_clicked(move |_| {
+            if state::undo(&state) {
+                on_change(None);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let on_change = on_change.clone();
+        redo_button.connect_clicked(move |_| {
+            if state::redo(&state) {
+                on_change(None);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let key_controller = gtk4::EventControllerKey::new();
+        key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        key_controller.connect_key_pressed(move |_, keyval, _, modifiers| {
+            let ctrl = modifiers.contains(gtk4::gdk::ModifierType::CONTROL_MASK);
+            let shift = modifiers.contains(gtk4::gdk::ModifierType::SHIFT_MASK);
+            if ctrl && !shift && keyval == gtk4::gdk::Key::z {
+                if state::undo(&state) {
+                    on_change(None);
+                }
+                return glib::Propagation::Stop;
+            }
+            if ctrl && shift && keyval == gtk4::gdk::Key::Z {
+                if state::redo(&state) {
+                    on_change(None);
+                }
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(key_controller);
+    }
+
     // ── Spreadsheet toggle: swaps the main view; refreshes on the way in
     // so it reflects whatever changed while it was hidden. ──
     {
@@ -218,6 +279,15 @@ pub fn build(app: &adw::Application) {
             } else {
                 main_view_stack.set_visible_child_name("browse");
             }
+        });
+    }
+    {
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let toast_overlay = toast_overlay.clone();
+        let spreadsheet_widgets = spreadsheet_widgets.clone();
+        spreadsheet_widgets.add_row_button.clone().connect_clicked(move |_| {
+            spreadsheet::add_row(&spreadsheet_widgets, &state, &on_change, &toast_overlay);
         });
     }
 
@@ -339,6 +409,7 @@ pub fn build(app: &adw::Application) {
         let on_change_cell = on_change_cell.clone();
         let next_selection_is_new = next_selection_is_new.clone();
         sidebar_widgets.add_button.clone().connect_clicked(move |_| {
+            state::push_undo(&state);
             let seeded_category =
                 sidebar::current_filter_category(&sidebar_widgets).unwrap_or_default();
             let seeded_tag = sidebar::current_filter_tag(&sidebar_widgets);
@@ -401,6 +472,7 @@ pub fn build(app: &adw::Application) {
                 return;
             }
 
+            state::push_undo(&state);
             {
                 let mut s = state.borrow_mut();
                 let existing_idx = original_key
