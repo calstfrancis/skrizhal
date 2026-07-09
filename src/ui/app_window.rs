@@ -15,6 +15,8 @@ use super::sidebar;
 use super::state::{self, ChangeCallback, SharedState};
 use crate::config::Config;
 
+type RefreshViewCell = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
 /// Selects the row whose widget name matches `key`, firing `row-selected` so
 /// the detail pane follows. Returns whether a matching row was found.
 fn select_row_by_key(list_box: &gtk4::ListBox, key: Option<&str>) -> bool {
@@ -275,7 +277,7 @@ pub fn build(app: &adw::Application) {
     // refresh_view (defined below, once search/category/tag widgets are all
     // wired up) needs to be reachable from on_change's body, which is built
     // first — so it's threaded through this cell rather than captured directly.
-    let refresh_view_cell: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let refresh_view_cell: RefreshViewCell = Rc::new(RefCell::new(None));
     let on_change: ChangeCallback = {
         let state = state.clone();
         let sidebar_widgets = sidebar_widgets.clone();
