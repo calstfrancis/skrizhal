@@ -5,6 +5,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.0-dev1] — Editing polish, tag filtering, and syntax-highlighted raw YAML
+
+### Added
+- **Multi-select tag filter** — the sidebar's tag filter is now a checkbox popover instead of a
+  single-choice dropdown, matching any of the selected tags (`core::FilterOptions.tags` replaces
+  the old single `tag` field).
+- **Syntax-highlighted Raw YAML view**, via GtkSourceView5 (new dependency, already present in
+  the pinned GNOME 50 runtime/SDK — no flatpak manifest changes needed), with line numbers and a
+  style scheme that follows the system light/dark color scheme live.
+  - Adding the dependency, remember to update `packaging/cargo-sources.json` if `Cargo.lock` ever
+    changes again (`python3 flatpak-cargo-generator.py Cargo.lock -o packaging/cargo-sources.json`).
+- **Inline per-field validation warnings** — Category, Organization, Location, Date, and Tags now
+  show a warning icon with a tooltip directly on the offending row, in addition to the existing
+  summary banner.
+- **Recently-used tags quick-pick** on the Tags field, mirroring the existing Category suggestion
+  popover, sourced from actual tag usage counts across the file.
+- **"Add Entry" button on the empty-state placeholder**, so a first-time or fully-filtered view
+  isn't a dead end.
+- **Focus Mode**: the sidebar now collapses via an animated slide (`GtkRevealer`) instead of an
+  instant show/hide, and the pane position is restored (not just re-shown) when toggled back on.
+- **Sidebar/detail split position now persists** across launches (debounced, matching Zerkalo's
+  pane-position idiom).
+- Real keyboard shortcuts: **Ctrl+N** (New File), **Ctrl+O** (Open), **Ctrl+Shift+S** (Save As),
+  **Ctrl+F** (focus search) — shown as shortcut labels in the header menu.
+
+### Changed
+- **Add Entry button** is now an accent-colored (`suggested-action`) button instead of a plain
+  bordered icon button, so it reads as the primary action in the header bar instead of blending
+  in as a tiny `+`.
+- **Date fields** (Date Type / Start Date / End Date) are now part of the same "Entry"
+  `PreferencesGroup` as Title/Organization/Location/Tags instead of a separate "Date" group below
+  it — removes an unnecessary visual break between fields that belong together.
+- **Window default height** increased from 650 to 760px so the full form (including the Date
+  rows) fits without scrolling on a freshly opened window.
+- **Tab now selects the destination field's full text** when moving between entry fields (Key,
+  Category, Title, Organization, Location, Start/End Date, Tags), so typing immediately replaces
+  the value instead of requiring a manual select-all first.
+- **Sidebar row Delete** is now a direct destructive-styled button on the row instead of buried
+  one level inside the kebab menu — cuts a click for the most common destructive action. Duplicate
+  remains in the kebab menu.
+
+---
+
 ## [0.3.1] "Clear Ledger" — Undo/redo, New File/Open/Save As/Preferences, spreadsheet mode removed
 
 ### Removed

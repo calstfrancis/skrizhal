@@ -9,7 +9,7 @@ tempfile = "3.27.0"
 
 [package]
 name = "skrizhal"
-version = "0.3.1"
+version = "0.4.0-dev1"
 edition = "2021"
 license = "MIT"
 description = "YAML editor/reader for CV elements, callable from Zerkalo in CV mode"
@@ -24,6 +24,7 @@ libadwaita = { version = "0.5", features = ["v1_4"] }
 serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
 shellexpand = "3.1.2"
+sourceview5 = "0.7"
 thiserror = { workspace = true }
 toml = "1.1.2"
 

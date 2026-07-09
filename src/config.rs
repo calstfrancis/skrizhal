@@ -11,6 +11,9 @@ pub struct Config {
     /// Shown once on first run; reachable again later via the header menu.
     #[serde(default)]
     pub has_seen_field_guide: bool,
+    /// Sidebar/detail split position, in pixels from the left edge.
+    #[serde(default = "default_pane_position")]
+    pub pane_position: i32,
 }
 
 impl Default for Config {
@@ -18,8 +21,13 @@ impl Default for Config {
         Config {
             data_path: default_data_path(),
             has_seen_field_guide: false,
+            pane_position: default_pane_position(),
         }
     }
+}
+
+fn default_pane_position() -> i32 {
+    320
 }
 
 /// Defaults to Zerkalo's own default work directory — Skrizhal's CV element

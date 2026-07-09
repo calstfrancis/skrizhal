@@ -41,7 +41,7 @@ pub fn build(app: &adw::Application) {
         .application(app)
         .title("Skrizhal")
         .default_width(1000)
-        .default_height(650)
+        .default_height(760)
         .build();
 
     let config = Config::load();
@@ -51,17 +51,118 @@ pub fn build(app: &adw::Application) {
     let sidebar_widgets = sidebar::build(&window);
     let detail_widgets = detail::build();
     let toast_overlay = adw::ToastOverlay::new();
+
+    // Recently-used tags quick-pick: rebuilt fresh each time the popover
+    // opens, mirroring the Category suggestion popover but sourced from
+    // actual tag usage across the file rather than a fixed list.
+    {
+        let state = state.clone();
+        let tags_row = detail_widgets.tags_row.clone();
+        let tags_suggest_box = detail_widgets.tags_suggest_box.clone();
+        let popover = detail_widgets.tags_suggest_popover.clone();
+        detail_widgets.tags_suggest_popover.connect_show(move |_| {
+            while let Some(child) = tags_suggest_box.first_child() {
+                tags_suggest_box.remove(&child);
+            }
+            let mut tags = skrizhal_core::all_tags_with_counts(&state.borrow().entries);
+            tags.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            for (tag, count) in tags.into_iter().take(12) {
+                let btn = gtk4::Button::builder()
+                    .label(format!("{tag} ({count})"))
+                    .css_classes(["flat"])
+                    .build();
+                let tags_row = tags_row.clone();
+                let popover = popover.clone();
+                btn.connect_clicked(move |_| {
+                    let current = tags_row.text().to_string();
+                    let mut parts: Vec<String> = current
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if !parts.iter().any(|p| p == &tag) {
+                        parts.push(tag.clone());
+                    }
+                    tags_row.set_text(&parts.join(", "));
+                    popover.popdown();
+                });
+                tags_suggest_box.append(&btn);
+            }
+            if tags_suggest_box.first_child().is_none() {
+                let empty = gtk4::Label::builder()
+                    .label("No tags used yet")
+                    .css_classes(["dim-label"])
+                    .margin_top(6)
+                    .margin_bottom(6)
+                    .margin_start(12)
+                    .margin_end(12)
+                    .build();
+                tags_suggest_box.append(&empty);
+            }
+        });
+    }
     // Set by the Add-entry handler right before it triggers a refresh, so the
     // row-selected handler that follows knows to enable key auto-generation
     // for that one selection instead of treating it like any other load.
     let next_selection_is_new: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
+    // Focus Mode: the sidebar collapses via a Revealer (animated slide) rather
+    // than an instant set_visible, so hiding it for distraction-free editing
+    // reads as a deliberate transition instead of a jump-cut.
+    let sidebar_revealer = gtk4::Revealer::builder()
+        .transition_type(gtk4::RevealerTransitionType::SlideLeft)
+        .reveal_child(true)
+        .child(&sidebar_widgets.root)
+        .build();
+
     let paned = gtk4::Paned::new(gtk4::Orientation::Horizontal);
-    paned.set_start_child(Some(&sidebar_widgets.root));
+    paned.set_start_child(Some(&sidebar_revealer));
     paned.set_end_child(Some(&detail_widgets.outer_stack));
     paned.set_resize_start_child(false);
     paned.set_shrink_start_child(false);
-    paned.set_position(320);
+    paned.set_position(config.pane_position);
+
+    // Remembers the split width to restore when Focus Mode is turned back
+    // off — the revealer alone doesn't reclaim the paned's reserved width,
+    // so the toggle handler below also drives `paned`'s position directly.
+    let last_pane_position: Rc<Cell<i32>> = Rc::new(Cell::new(config.pane_position));
+    // Set around Focus-Mode-driven position changes so they don't get
+    // mistaken for a manual drag and persisted over the real preference.
+    let suppress_position_persist: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+
+    // Persist the sidebar/detail split, debounced 400ms after the last drag.
+    // The realize-then-idle ready flag keeps the initial layout pass (which
+    // also fires position-notify) from immediately overwriting the saved value.
+    {
+        let ready: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let ready_for_realize = ready.clone();
+        paned.connect_realize(move |_| {
+            let ready_for_idle = ready_for_realize.clone();
+            glib::idle_add_local_once(move || ready_for_idle.set(true));
+        });
+        let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let suppress_position_persist = suppress_position_persist.clone();
+        paned.connect_position_notify(move |p| {
+            if !ready.get() || suppress_position_persist.get() {
+                return;
+            }
+            let pos = p.position();
+            let pending_for_cb = pending.clone();
+            let mut slot = pending.borrow_mut();
+            if let Some(id) = slot.take() {
+                id.remove();
+            }
+            *slot = Some(glib::timeout_add_local_once(
+                std::time::Duration::from_millis(400),
+                move || {
+                    *pending_for_cb.borrow_mut() = None;
+                    let mut c = Config::load();
+                    c.pane_position = pos;
+                    let _ = c.save();
+                },
+            ));
+        });
+    }
 
     toast_overlay.set_child(Some(&paned));
 
@@ -73,8 +174,29 @@ pub fn build(app: &adw::Application) {
         .active(true)
         .build();
     {
-        let sidebar_root = sidebar_widgets.root.clone();
-        sidebar_toggle.connect_toggled(move |btn| sidebar_root.set_visible(btn.is_active()));
+        let sidebar_revealer = sidebar_revealer.clone();
+        let paned = paned.clone();
+        let last_pane_position = last_pane_position.clone();
+        let suppress_position_persist = suppress_position_persist.clone();
+        sidebar_toggle.connect_toggled(move |btn| {
+            suppress_position_persist.set(true);
+            if btn.is_active() {
+                paned.set_position(last_pane_position.get());
+                sidebar_revealer.set_reveal_child(true);
+                // Re-enforce the normal drag-shrink floor now that the
+                // sidebar's real (non-zero-min) content is back.
+                paned.set_shrink_start_child(false);
+            } else {
+                last_pane_position.set(paned.position());
+                sidebar_revealer.set_reveal_child(false);
+                // shrink_start_child(false) clamps position to the sidebar
+                // content's minimum width — lift that so position(0) can
+                // actually reclaim the space instead of leaving a gap.
+                paned.set_shrink_start_child(true);
+                paned.set_position(0);
+            }
+            suppress_position_persist.set(false);
+        });
     }
     header.pack_start(&sidebar_toggle);
     header.pack_start(&sidebar_widgets.add_button);
@@ -97,34 +219,13 @@ pub fn build(app: &adw::Application) {
         .build();
     let menu_popover = gtk4::Popover::new();
     let menu_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    let new_file_btn = gtk4::Button::builder()
-        .label("New File…")
-        .css_classes(["flat"])
-        .build();
-    let choose_file_btn = gtk4::Button::builder()
-        .label("Open…")
-        .css_classes(["flat"])
-        .build();
-    let save_as_btn = gtk4::Button::builder()
-        .label("Save As…")
-        .css_classes(["flat"])
-        .build();
-    let reload_btn = gtk4::Button::builder()
-        .label("Reload from Disk")
-        .css_classes(["flat"])
-        .build();
-    let manage_tags_btn = gtk4::Button::builder()
-        .label("Manage Tags…")
-        .css_classes(["flat"])
-        .build();
-    let preferences_btn = gtk4::Button::builder()
-        .label("Preferences…")
-        .css_classes(["flat"])
-        .build();
-    let field_guide_btn = gtk4::Button::builder()
-        .label("Field Guide…")
-        .css_classes(["flat"])
-        .build();
+    let new_file_btn = make_menu_item("New File…", Some("Ctrl+N"));
+    let choose_file_btn = make_menu_item("Open…", Some("Ctrl+O"));
+    let save_as_btn = make_menu_item("Save As…", Some("Ctrl+Shift+S"));
+    let reload_btn = make_menu_item("Reload from Disk", None);
+    let manage_tags_btn = make_menu_item("Manage Tags…", None);
+    let preferences_btn = make_menu_item("Preferences…", None);
+    let field_guide_btn = make_menu_item("Field Guide…", None);
     menu_box.append(&new_file_btn);
     menu_box.append(&choose_file_btn);
     menu_box.append(&save_as_btn);
@@ -171,6 +272,10 @@ pub fn build(app: &adw::Application) {
     // Built via a shared cell so refresh_list can hand a clone of it to
     // each row's Duplicate/Delete buttons — see state::ChangeCallback.
     let on_change_cell: Rc<RefCell<Option<ChangeCallback>>> = Rc::new(RefCell::new(None));
+    // refresh_view (defined below, once search/category/tag widgets are all
+    // wired up) needs to be reachable from on_change's body, which is built
+    // first — so it's threaded through this cell rather than captured directly.
+    let refresh_view_cell: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let on_change: ChangeCallback = {
         let state = state.clone();
         let sidebar_widgets = sidebar_widgets.clone();
@@ -180,13 +285,20 @@ pub fn build(app: &adw::Application) {
         let next_selection_is_new = next_selection_is_new.clone();
         let undo_button = undo_button.clone();
         let redo_button = redo_button.clone();
+        let refresh_view_cell = refresh_view_cell.clone();
         Rc::new(move |select_key: Option<String>| {
             if let Err(err) = state::persist(&state) {
                 toast_overlay.add_toast(adw::Toast::new(&err));
             }
             undo_button.set_sensitive(state::can_undo(&state));
             redo_button.set_sensitive(state::can_redo(&state));
-            sidebar::refresh_tag_filter_options(&sidebar_widgets, &state);
+            let refresh_view_cell = refresh_view_cell.clone();
+            let on_tag_toggle: Rc<dyn Fn()> = Rc::new(move || {
+                if let Some(rv) = refresh_view_cell.borrow().clone() {
+                    rv();
+                }
+            });
+            sidebar::refresh_tag_filter_options(&sidebar_widgets, &state, on_tag_toggle);
             let cb = on_change_cell
                 .borrow()
                 .clone()
@@ -227,6 +339,10 @@ pub fn build(app: &adw::Application) {
     {
         let state = state.clone();
         let on_change = on_change.clone();
+        let new_file_btn = new_file_btn.clone();
+        let choose_file_btn = choose_file_btn.clone();
+        let save_as_btn = save_as_btn.clone();
+        let search_entry = sidebar_widgets.search_entry.clone();
         let key_controller = gtk4::EventControllerKey::new();
         key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
         key_controller.connect_key_pressed(move |_, keyval, _, modifiers| {
@@ -244,13 +360,29 @@ pub fn build(app: &adw::Application) {
                 }
                 return glib::Propagation::Stop;
             }
+            if ctrl && !shift && keyval == gtk4::gdk::Key::n {
+                new_file_btn.emit_clicked();
+                return glib::Propagation::Stop;
+            }
+            if ctrl && !shift && keyval == gtk4::gdk::Key::o {
+                choose_file_btn.emit_clicked();
+                return glib::Propagation::Stop;
+            }
+            if ctrl && shift && keyval == gtk4::gdk::Key::S {
+                save_as_btn.emit_clicked();
+                return glib::Propagation::Stop;
+            }
+            if ctrl && !shift && keyval == gtk4::gdk::Key::f {
+                search_entry.grab_focus();
+                return glib::Propagation::Stop;
+            }
             glib::Propagation::Proceed
         });
         window.add_controller(key_controller);
     }
 
     // ── Filter/search changes: refresh the view without touching disk ──
-    let refresh_view = {
+    let refresh_view: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
         let sidebar_widgets = sidebar_widgets.clone();
         let on_change_cell = on_change_cell.clone();
@@ -259,7 +391,7 @@ pub fn build(app: &adw::Application) {
                 let mut s = state.borrow_mut();
                 s.search = sidebar_widgets.search_entry.text().to_string();
                 s.filter_category = sidebar::current_filter_category(&sidebar_widgets);
-                s.filter_tag = sidebar::current_filter_tag(&sidebar_widgets);
+                s.filter_tags = sidebar::current_filter_tags(&sidebar_widgets);
             }
             let cb = on_change_cell
                 .borrow()
@@ -269,7 +401,8 @@ pub fn build(app: &adw::Application) {
             let selected = state.borrow().selected_key.clone();
             select_row_by_key(&sidebar_widgets.list_box, selected.as_deref());
         }
-    };
+    });
+    *refresh_view_cell.borrow_mut() = Some(refresh_view.clone());
     {
         let refresh_view = refresh_view.clone();
         sidebar_widgets
@@ -280,12 +413,6 @@ pub fn build(app: &adw::Application) {
         let refresh_view = refresh_view.clone();
         sidebar_widgets
             .category_filter
-            .connect_selected_notify(move |_| refresh_view());
-    }
-    {
-        let refresh_view = refresh_view.clone();
-        sidebar_widgets
-            .tag_filter
             .connect_selected_notify(move |_| refresh_view());
     }
 
@@ -370,14 +497,14 @@ pub fn build(app: &adw::Application) {
             state::push_undo(&state);
             let seeded_category =
                 sidebar::current_filter_category(&sidebar_widgets).unwrap_or_default();
-            let seeded_tag = sidebar::current_filter_tag(&sidebar_widgets);
+            let seeded_tags = sidebar::current_filter_tags(&sidebar_widgets);
             let new_key = {
                 let mut s = state.borrow_mut();
                 let key = skrizhal_core::unique_key("new-entry", &s.entries);
                 s.entries.push(CvEntry {
                     key: key.clone(),
                     category: seeded_category,
-                    tags: seeded_tag.into_iter().collect(),
+                    tags: seeded_tags.into_iter().collect(),
                     ..Default::default()
                 });
                 key
@@ -391,6 +518,13 @@ pub fn build(app: &adw::Application) {
                 .expect("on_change_cell set before first use");
             cb(Some(new_key));
         });
+    }
+
+    {
+        let add_button = sidebar_widgets.add_button.clone();
+        detail_widgets
+            .empty_add_button
+            .connect_clicked(move |_| add_button.emit_clicked());
     }
 
     // ── Save button ──────────────────────────────────────────────────
@@ -568,7 +702,7 @@ pub fn build(app: &adw::Application) {
         toast.set_timeout(0);
         toast_overlay.add_toast(toast);
     }
-    sidebar::refresh_tag_filter_options(&sidebar_widgets, &state);
+    sidebar::refresh_tag_filter_options(&sidebar_widgets, &state, refresh_view.clone());
     sidebar::refresh_list(&sidebar_widgets, &state, &on_change);
     detail::show_empty(&detail_widgets);
 
@@ -577,4 +711,30 @@ pub fn build(app: &adw::Application) {
     if !config.has_seen_field_guide {
         field_guide::show(&window, true);
     }
+}
+
+fn make_menu_item(label: &str, shortcut: Option<&str>) -> gtk4::Button {
+    let btn = gtk4::Button::new();
+    btn.add_css_class("flat");
+
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    row.set_margin_start(4);
+    row.set_margin_end(6);
+
+    let name_lbl = gtk4::Label::new(Some(label));
+    name_lbl.set_halign(gtk4::Align::Start);
+    name_lbl.set_hexpand(true);
+    row.append(&name_lbl);
+
+    if let Some(sc) = shortcut {
+        let sc_lbl = gtk4::Label::new(Some(sc));
+        sc_lbl.set_halign(gtk4::Align::End);
+        sc_lbl.add_css_class("dim-label");
+        sc_lbl.add_css_class("caption");
+        sc_lbl.set_margin_start(16);
+        row.append(&sc_lbl);
+    }
+
+    btn.set_child(Some(&row));
+    btn
 }

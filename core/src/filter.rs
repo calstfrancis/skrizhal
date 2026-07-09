@@ -6,7 +6,8 @@ use crate::entry::CvEntry;
 #[derive(Clone, Debug, Default)]
 pub struct FilterOptions<'a> {
     pub category: Option<&'a str>,
-    pub tag: Option<&'a str>,
+    /// Entry must carry at least one of these tags. Empty matches everything.
+    pub tags: Vec<&'a str>,
     /// Case-insensitive substring match against title, organization, and
     /// description text.
     pub query: Option<&'a str>,
@@ -22,10 +23,8 @@ pub fn filter_entries<'a>(entries: &'a [CvEntry], opts: &FilterOptions) -> Vec<&
                     return false;
                 }
             }
-            if let Some(tag) = opts.tag {
-                if !e.tags.iter().any(|x| x == tag) {
-                    return false;
-                }
+            if !opts.tags.is_empty() && !opts.tags.iter().any(|t| e.tags.iter().any(|x| x == t)) {
+                return false;
             }
             if let Some(q) = &query_lower {
                 let haystack = format!(
@@ -84,13 +83,26 @@ ssrhc-award:
     fn filter_by_tag() {
         let entries = parse_str(SAMPLE).unwrap().entries;
         let opts = FilterOptions {
-            tag: Some("ministry"),
+            tags: vec!["ministry"],
             ..Default::default()
         };
         let result = filter_entries(&entries, &opts);
         let mut keys: Vec<&str> = result.iter().map(|e| e.key.as_str()).collect();
         keys.sort_unstable();
         assert_eq!(keys, vec!["hope-united-2025", "mdiv-2024"]);
+    }
+
+    #[test]
+    fn filter_by_multiple_tags_matches_any() {
+        let entries = parse_str(SAMPLE).unwrap().entries;
+        let opts = FilterOptions {
+            tags: vec!["current", "academic"],
+            ..Default::default()
+        };
+        let result = filter_entries(&entries, &opts);
+        let mut keys: Vec<&str> = result.iter().map(|e| e.key.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["hope-united-2025", "mdiv-2024", "ssrhc-award"]);
     }
 
     #[test]
@@ -109,7 +121,7 @@ ssrhc-award:
     fn filter_combines_criteria_with_and() {
         let entries = parse_str(SAMPLE).unwrap().entries;
         let opts = FilterOptions {
-            tag: Some("academic"),
+            tags: vec!["academic"],
             category: Some("Award"),
             query: None,
         };

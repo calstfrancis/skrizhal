@@ -23,7 +23,7 @@ pub struct AppState {
     raw_failed: BTreeMap<String, serde_yaml_ng::Value>,
     pub search: String,
     pub filter_category: Option<String>,
-    pub filter_tag: Option<String>,
+    pub filter_tags: Vec<String>,
     undo_stack: Vec<Vec<CvEntry>>,
     redo_stack: Vec<Vec<CvEntry>>,
 }
@@ -50,7 +50,7 @@ fn empty_state(data_path: PathBuf) -> AppState {
         raw_failed: BTreeMap::new(),
         search: String::new(),
         filter_category: None,
-        filter_tag: None,
+        filter_tags: Vec::new(),
         undo_stack: Vec::new(),
         redo_stack: Vec::new(),
     }

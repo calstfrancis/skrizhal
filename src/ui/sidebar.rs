@@ -1,3 +1,7 @@
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::rc::Rc;
+
 use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
@@ -14,7 +18,9 @@ pub struct SidebarWidgets {
     pub root: gtk4::Box,
     pub search_entry: gtk4::SearchEntry,
     pub category_filter: gtk4::DropDown,
-    pub tag_filter: gtk4::DropDown,
+    pub tag_filter_button: gtk4::MenuButton,
+    tag_filter_popover_box: gtk4::Box,
+    selected_tags: Rc<RefCell<BTreeSet<String>>>,
     pub list_box: gtk4::ListBox,
     pub add_button: gtk4::Button,
     pub window: adw::ApplicationWindow,
@@ -39,15 +45,30 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
     let category_filter = gtk4::DropDown::from_strings(&category_refs);
     category_filter.set_hexpand(true);
 
-    let tag_filter = gtk4::DropDown::from_strings(&[ALL_TAGS]);
-    tag_filter.set_hexpand(true);
+    let tag_filter_button = gtk4::MenuButton::builder()
+        .label(ALL_TAGS)
+        .hexpand(true)
+        .build();
+    let tag_filter_popover = gtk4::Popover::new();
+    let tag_filter_popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let tag_filter_scroll = gtk4::ScrolledWindow::builder()
+        .max_content_height(280)
+        .propagate_natural_height(true)
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .child(&tag_filter_popover_box)
+        .build();
+    tag_filter_popover.set_child(Some(&tag_filter_scroll));
+    tag_filter_button.set_popover(Some(&tag_filter_popover));
 
     filter_row.append(&category_filter);
-    filter_row.append(&tag_filter);
+    filter_row.append(&tag_filter_button);
     root.append(&filter_row);
 
-    let add_button = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_button.set_tooltip_text(Some("Add Entry"));
+    let add_button = gtk4::Button::builder()
+        .icon_name("list-add-symbolic")
+        .tooltip_text("Add Entry")
+        .css_classes(["suggested-action"])
+        .build();
 
     let scrolled = gtk4::ScrolledWindow::builder()
         .vexpand(true)
@@ -63,23 +84,63 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
         root,
         search_entry,
         category_filter,
-        tag_filter,
+        tag_filter_button,
+        tag_filter_popover_box,
+        selected_tags: Rc::new(RefCell::new(BTreeSet::new())),
         list_box,
         add_button,
         window: window.clone(),
     }
 }
 
-/// Rebuilds the tag filter's options from the current entry set, keeping the
-/// selection on "All Tags" if the previously selected tag no longer exists.
-pub fn refresh_tag_filter_options(widgets: &SidebarWidgets, state: &SharedState) {
+fn update_tag_filter_button_label(widgets: &SidebarWidgets) {
+    let selected = widgets.selected_tags.borrow();
+    let label = match selected.len() {
+        0 => ALL_TAGS.to_string(),
+        1 => selected.iter().next().cloned().unwrap_or_default(),
+        n => format!("{n} Tags"),
+    };
+    widgets.tag_filter_button.set_label(&label);
+}
+
+/// Rebuilds the tag filter popover's checkbox list from the current entry
+/// set, dropping any previously selected tags that no longer exist. `on_toggle`
+/// fires whenever a checkbox is flipped, so the caller can re-run filtering.
+pub fn refresh_tag_filter_options(
+    widgets: &SidebarWidgets,
+    state: &SharedState,
+    on_toggle: Rc<dyn Fn()>,
+) {
     let tags = skrizhal_core::all_tags_with_counts(&state.borrow().entries);
-    let mut strings = vec![ALL_TAGS.to_string()];
-    strings.extend(tags.into_iter().map(|(t, c)| format!("{t} ({c})")));
-    let refs: Vec<&str> = strings.iter().map(|s| s.as_str()).collect();
-    let model = gtk4::StringList::new(&refs);
-    widgets.tag_filter.set_model(Some(&model));
-    widgets.tag_filter.set_selected(0);
+    let tag_names: BTreeSet<String> = tags.iter().map(|(t, _)| t.clone()).collect();
+    widgets.selected_tags.borrow_mut().retain(|t| tag_names.contains(t));
+
+    while let Some(child) = widgets.tag_filter_popover_box.first_child() {
+        widgets.tag_filter_popover_box.remove(&child);
+    }
+    for (tag, count) in tags {
+        let check = gtk4::CheckButton::builder()
+            .label(format!("{tag} ({count})"))
+            .active(widgets.selected_tags.borrow().contains(&tag))
+            .build();
+        {
+            let selected_tags = widgets.selected_tags.clone();
+            let widgets = widgets.clone();
+            let tag = tag.clone();
+            let on_toggle = on_toggle.clone();
+            check.connect_toggled(move |btn| {
+                if btn.is_active() {
+                    selected_tags.borrow_mut().insert(tag.clone());
+                } else {
+                    selected_tags.borrow_mut().remove(&tag);
+                }
+                update_tag_filter_button_label(&widgets);
+                on_toggle();
+            });
+        }
+        widgets.tag_filter_popover_box.append(&check);
+    }
+    update_tag_filter_button_label(widgets);
 }
 
 fn selected_dropdown_text(dd: &gtk4::DropDown) -> Option<String> {
@@ -88,22 +149,12 @@ fn selected_dropdown_text(dd: &gtk4::DropDown) -> Option<String> {
         .map(|s| s.string().to_string())
 }
 
-/// Extracts the bare tag name from a "tag (N)" dropdown entry.
-fn strip_count_suffix(s: &str) -> String {
-    match s.rfind(" (") {
-        Some(idx) => s[..idx].to_string(),
-        None => s.to_string(),
-    }
-}
-
 pub fn current_filter_category(widgets: &SidebarWidgets) -> Option<String> {
     selected_dropdown_text(&widgets.category_filter).filter(|s| s != ALL_CATEGORIES)
 }
 
-pub fn current_filter_tag(widgets: &SidebarWidgets) -> Option<String> {
-    selected_dropdown_text(&widgets.tag_filter)
-        .filter(|s| s != ALL_TAGS)
-        .map(|s| strip_count_suffix(&s))
+pub fn current_filter_tags(widgets: &SidebarWidgets) -> Vec<String> {
+    widgets.selected_tags.borrow().iter().cloned().collect()
 }
 
 /// Clears and repopulates the entry list from `state`, applying the current
@@ -118,7 +169,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
         let s = state.borrow();
         let opts = FilterOptions {
             category: s.filter_category.as_deref(),
-            tag: s.filter_tag.as_deref(),
+            tags: s.filter_tags.iter().map(|t| t.as_str()).collect(),
             query: if s.search.trim().is_empty() {
                 None
             } else {
@@ -149,6 +200,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
             .icon_name("view-more-symbolic")
             .valign(gtk4::Align::Center)
             .css_classes(["flat"])
+            .tooltip_text("More")
             .build();
         let popover = gtk4::Popover::new();
         let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -156,14 +208,18 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
             .label("Duplicate")
             .css_classes(["flat"])
             .build();
-        let delete_btn = gtk4::Button::builder()
-            .label("Delete")
-            .css_classes(["flat", "destructive-action"])
-            .build();
         popover_box.append(&duplicate_btn);
-        popover_box.append(&delete_btn);
         popover.set_child(Some(&popover_box));
         menu_button.set_popover(Some(&popover));
+
+        // Delete sits directly on the row (not behind the kebab menu) since
+        // it's the common destructive action users reach for most.
+        let delete_btn = gtk4::Button::builder()
+            .icon_name("user-trash-symbolic")
+            .valign(gtk4::Align::Center)
+            .css_classes(["flat", "destructive-action"])
+            .tooltip_text("Delete")
+            .build();
 
         {
             let state = state.clone();
@@ -190,11 +246,9 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
             let state = state.clone();
             let key = entry.key.clone();
             let title = entry.title.clone();
-            let popover = popover.clone();
             let on_change = on_change.clone();
             let window = widgets.window.clone();
             delete_btn.connect_clicked(move |_| {
-                popover.popdown();
                 let label = if title.is_empty() { key.clone() } else { title.clone() };
                 let dialog = adw::MessageDialog::new(
                     Some(&window),
@@ -227,6 +281,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
             });
         }
 
+        row.add_suffix(&delete_btn);
         row.add_suffix(&menu_button);
         widgets.list_box.append(&row);
     }
