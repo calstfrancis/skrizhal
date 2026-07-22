@@ -98,19 +98,48 @@ documentation policy.
 - `validate.rs` — soft-validation warnings
 - `date.rs` — date-range parsing/sorting, `DateMode`/`split_date_string`/`join_date_string`
 - `filter.rs` — tag/category/search filtering
+- `sort.rs` — `SortMode` (newest-first/title/category) + `sort_entries`
+- `profile.rs` — CV profiles (`_profiles` in the data file) + `resolve_section`/`resolve_profile`
+- `health.rs` — file-level checks: near-duplicates, tag typos, untagged, unknown categories
+- `import.rs` — hand-rolled BibTeX → `CvEntry` (no external parser dependency, deliberately)
 - `tags.rs` — tag rename/merge, usage counts
 
 **GUI (root `src/`, package `skrizhal`):**
 - `config.rs` — `~/.config/skrizhal/config.toml` (data file path, field-guide-seen flag)
 - `ui/state.rs` — shared `AppState` + the `ChangeCallback` that persists + refreshes after any mutation
-- `ui/sidebar.rs`, `ui/detail.rs`, `ui/dialogs.rs`, `ui/field_guide.rs`,
-  `ui/changelog.rs`, `ui/app_window.rs`
+- Autosave lives in `ui/app_window.rs` (`commit_edit`/`flush_autosave`). Two invariants worth
+  knowing before touching it: `suppress_autosave` must be held (save-and-restore, not a bare
+  `set(false)`) around *any* programmatic write into the form, or a list rebuild will re-commit
+  stale form contents — deleting an entry would resurrect it; and an autosave patches the one
+  affected row via `sidebar::update_row_in_place` rather than calling `refresh_list`, because a
+  rebuild reloads the detail pane and eats the keystroke the user is mid-way through typing.
+- `git_backup.rs` — git via `flatpak-spawn --host git` (no `git2` dependency; see below)
+- `ui/sidebar.rs`, `ui/detail.rs`, `ui/dialogs.rs`, `ui/field_guide.rs`, `ui/profiles.rs`,
+  `ui/health.rs`, `ui/history.rs`, `ui/changelog.rs`, `ui/app_window.rs`
+
+**Reserved keys:** top-level keys starting with `_` in `cv-elements.yaml` are configuration, not
+entries — `_profiles` today. `parse_str` routes them away from entry parsing, and unknown ones
+round-trip untouched so a file written by a newer version survives an older one. Anything
+iterating the data file's keys (including Zerkalo's `cv-helpers.typ`) must skip them; forgetting
+this once meant `cv-section` would have rendered the profiles block as a CV entry.
+
+**Git:** `git_backup.rs` shells out rather than using `git2`, because `org.gnome.Platform` bundles
+no git binary and adding a Rust git library would mean regenerating `packaging/cargo-sources.json`.
+Same approach (and same `flatpak-spawn --host` + `-C` reasoning) as Retseptura's `git_backup.py`.
+Needs `--talk-name=org.freedesktop.Flatpak` in finish-args.
 
 Parses CV YAML with plain `serde_yaml_ng` against `skrizhal-core`'s own schema — deliberately
 does **not** go through the `hayagriva` crate's parser, since its `EntryType` enum is closed and
 would reject custom categories like `"Ministry Position"`. See `plan.md` for the full reasoning.
 
-## Phase 3 (Zerkalo integration) status
+## Phase status
 
-Not started. See `plan.md`'s Phase 3a/3b breakdown. The workspace split above was Phase 3a's
-first step, done ahead of the rest since it was low-risk and unblocks everything else.
+Phase 3 (Zerkalo integration) and Phase 4 are both complete apart from two items, both recorded
+with their reasons at the end of `plan.md`: ORCID/LinkedIn import (item 26) and an embedded Typst
+preview (item 31, parked on whether the target `typst` release builds under the GNOME 50
+runtime's rustc 1.89).
+
+Zerkalo-side code lives in that repo: `templates/cv-helpers.typ` (`cv-entry`, `cv-section`,
+`cv-profile`) and the compile-path wiring in `src/cv_mode.rs`/`src/ui/preview_pane.rs`. When
+changing the data format, change both — `cv-helpers.typ` reads the same YAML directly, and
+`compiler.rs`'s two CV tests are what catch a mismatch.

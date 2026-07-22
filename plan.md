@@ -304,3 +304,209 @@ commit + tag (e.g. `v0.3.0`) + push before either item can start.
 (Resolved while building 3a: `cv-section`'s date-sort — it sorts Typst-side in `cv-helpers.typ`
 directly, no Skrizhal pre-sorting needed, since the function already has all the entries' raw
 date strings in hand.)
+
+---
+
+# Phase 4 — From element database to CV builder
+
+Phase 1–3 built the thing this document set out to build: a database of CV elements, and a way
+for Zerkalo to pull them into a document. Reviewing the result against the pain point in this
+plan's opening paragraph — `IWK-CV.typ`'s hardcoded content gated by hand-toggled booleans like
+`show-volunteer` — turned up a gap worth naming explicitly, because it shapes everything below:
+
+**Tags plus `#cv-section(tag: ...)` are a better version of those booleans, not a different
+thing.** The toggles moved from the document into the database, which is a real improvement (one
+source of truth, no copy-paste between CVs), but the *shape* of the problem is unchanged. There's
+still no way to say "this CV, in this order, with these entries and not those" and give it a name
+you can come back to in six months. A filter is not a document plan: it has no ordering, no
+explicit include/exclude for the one-off exception, and nothing to reopen next time.
+
+So Phase 4's centre of gravity is the **CV Profile** (items 20–21). Everything else is either
+groundwork for it, or a fix for something that's plainly wrong today.
+
+## 4a — Fixes for things that are already wrong — ✅ done
+
+These are small, independently shippable, and don't depend on any of the design work below.
+
+20. **The sidebar sorts alphabetically; the README says chronologically; the chronological sort
+    function is dead code.** `core::sort_entries_by_date_desc` is exported from `core/src/lib.rs`
+    and called by nothing in `src/`. `sidebar.rs`'s `refresh_list` sorts
+    `by_key(|e| e.title.to_lowercase())`. For a CV database, most-recent-first is the right
+    default and alphabetical-by-title is close to useless (titles like "Student Minister" and
+    "Master of Divinity" have no meaningful alphabetical relationship). Fix: use the existing
+    date sort as the default, and add a sort selector (Date / Title / Category) in the sidebar
+    persisted to config, since alphabetical is genuinely useful when hunting for a known entry
+    in a long list.
+
+21. **Two different save models in one window.** Sidebar Delete/Duplicate and the Manage Tags
+    dialog all route through `on_change`, which persists to disk immediately. Detail-pane field
+    edits require pressing the Save button (`detail.rs:383`). Nothing warns on navigation away —
+    `select_row_by_key` loads the newly-selected entry over whatever was typed, and the edit is
+    gone with no toast, no dialog, no dirty marker. Fix: **autosave the detail pane** to match
+    everything else — commit on field change, debounced (~600ms) plus an immediate commit on
+    focus-out and on selection change. Undo already exists and is 50 deep (`state.rs`'s
+    `UNDO_LIMIT`), so it's the safety net. Keep the hard block on duplicate/empty keys: an entry
+    with an invalid key simply doesn't commit, and the existing inline error already says why.
+    Demote Save to a Ctrl+S accelerator rather than deleting the concept outright, since Raw YAML
+    mode still needs an explicit "parse this now" moment.
+
+22. **No external-change detection.** Phase 3b deliberately made Zerkalo re-read the YAML on every
+    compile so Skrizhal edits show up live — but the reverse doesn't hold. Skrizhal reads the file
+    once at launch; "Reload from Disk" is a manual, unprompted menu item. With two apps over one
+    file (and git in the picture once item 26 lands), Skrizhal silently overwriting an
+    externally-changed file is a real data-loss path. Fix: a `gio::FileMonitor` on `data_path`,
+    surfacing an `adw::Banner` ("This file changed on disk") with Reload / Keep Mine actions —
+    banner, not toast, per the root CLAUDE.md's rule that banners are for actionable one-off
+    suggestions tied to file state. Re-arm the monitor on Open/New File/Save As, and suppress the
+    self-triggered event from Skrizhal's own `persist()`.
+
+## 4b — CV Profiles — ✅ done
+
+23. **Profile schema (core crate).** A profile is a name, an ordered list of sections, and per
+    section: a heading, a set of tag/category rules, an explicit include list, and an explicit
+    exclude list. Explicit includes/excludes are what filters can't express — the one-off
+    exception ("this CV only, drop the retail job, keep the volunteer thing") that otherwise
+    forces a new single-use tag every time.
+
+    Stored under a reserved `_profiles:` top-level key in the same `cv-elements.yaml`, not a
+    sibling file: one file to point Zerkalo at, one file to version, one file to hand to another
+    machine. The leading underscore keeps it out of the entry namespace — `load_file` skips
+    `_`-prefixed keys rather than trying to parse them as entries, and (critically) they must
+    round-trip through the existing `raw_failed` passthrough mechanism untouched by older
+    versions of the app.
+
+    ```yaml
+    _profiles:
+      academic-2026:
+        label: Academic CV (2026)
+        sections:
+          - heading: Education
+            categories: [Education]
+          - heading: Ministry
+            categories: [Ministry Position]
+            tags: [ministry]
+            exclude: [some-early-placement]
+          - heading: Publications
+            categories: [Publication, Presentation]
+            include: [one-off-key-not-otherwise-matched]
+    ```
+
+24. **Profile editor UI + `#cv-profile("name")`.** A profile manager dialog (list of profiles,
+    add/duplicate/delete/rename) plus a per-profile section editor with drag-reorder. On the
+    Zerkalo side this collapses a hand-assembled run of `#cv-section` calls into a single
+    `#cv-profile("academic-2026")` — a new function in `cv-helpers.typ`, resolving the profile
+    from the same `skrizhal-cv-data` sys.input that already carries the entries, so it needs no
+    new plumbing in `preview_pane.rs` or `cv_mode.rs` at all.
+
+25. **Manual ordering within a section.** Real CVs lead with what's relevant, not with what's
+    most recent. An optional numeric `order` field on `CvEntry`, respected by `cv-section`/
+    `cv-profile` ahead of the date sort (entries without it fall back to date order, so nothing
+    changes for anyone who never sets it), plus drag-to-reorder in the sidebar when exactly one
+    category filter is active. Without this, profiles can't express "put the current ministry
+    position above the older but more prestigious academic post."
+
+## 4c — Getting data in and keeping it healthy — ✅ done, except ORCID/LinkedIn import
+
+26. **Importers.** Every entry is hand-typed today, and first run against an empty file is a blank
+    wall. In value order: **BibTeX/Hayagriva `.bib`** → Publication entries (note the irony worth
+    stating plainly — this plan rejected the `hayagriva` *crate* for CV storage because its
+    `EntryType` enum is closed, but for importing genuine publications that closed enum is
+    exactly right, and Zerkalo already depends on it; the importer lives behind a
+    default-off cargo feature on `skrizhal-core` so the core crate stays dependency-light for
+    Zerkalo); **ORCID** JSON; **LinkedIn** data-export CSV for employment/education. Import is
+    always additive with a preview-and-confirm step and key-collision handling, never a
+    wholesale replace.
+
+27. **Database health panel.** Validation is per-entry today. A file-level pass catches the class
+    of problem that per-entry validation structurally can't: near-duplicate entries (fuzzy
+    title+organization match, since three near-identical versions of the same job accumulate over
+    years), tags used exactly once (almost always a typo — `minstry` vs `ministry`), entries with
+    no tags at all, unknown categories. **Tag typos are the specific silent killer**: a mistyped
+    tag means an entry quietly vanishes from a generated CV, with no error raised anywhere in
+    either app.
+
+28. **Per-category dynamic forms.** `CATEGORY_REGISTRY` already carries `recommended_fields` and
+    `validate.rs` already warns when they're missing — but `detail.rs` builds an identical form
+    for every category and pushes category-specific fields into the generic "Additional Fields"
+    add/remove list. Selecting `Education` should materialize real *Degree* / *Field of Study*
+    rows; `Publication` should give *Venue* / *DOI*. The data needed is already in the registry
+    and simply unused by the form layer. Unrecognized `extra` keys keep falling through to the
+    Additional Fields list exactly as now.
+
+29. **Description bullets as a real repeater.** `description` is a `Vec<String>` in the schema but
+    a raw `TextView` split on newlines in the UI. Bullets are the highest-churn, highest-value
+    content on a CV and deserve per-bullet rows with add/remove/reorder and per-bullet character
+    counts. Also the natural future home for per-profile bullet variants, if that's ever wanted.
+
+30. **Git-backed history**, lifted from Retseptura's existing git-backed YAML storage rather than
+    designed fresh. A CV database is exactly the artifact you want versioned — "what did my CV
+    say when I applied there in 2024?" Auto-commit on save, per-entry history, restore a previous
+    version. Also upgrades item 22 from *detecting* concurrent edits to *recovering* from them.
+
+## 4d — Live preview — ⛔ still deferred, see below
+
+31. **Embed the Typst renderer in Skrizhal** so a CV can be previewed without opening Zerkalo,
+    reusing `cv-helpers.typ` and previewing a whole *profile*, not just one entry. This is the
+    item that would change what Skrizhal *is* — from a YAML form into a CV builder that happens
+    to store YAML.
+
+    **Deferred behind 4a–4c on purpose**, for reasons that are packaging, not design: the `typst`
+    crate is a very large dependency tree, every crate of which has to be vendored into
+    `packaging/cargo-sources.json` for the offline flatpak build, and the flatpak SDK's rustc is
+    pinned at **1.89** by the GNOME 50 runtime (see CLAUDE.md — this already bit the project once,
+    via gtk4-rs's MSRV). A Typst version bump raising its MSRV past 1.89 would strand the flatpak
+    with no in-manifest fix available. Prerequisite before starting: confirm the target `typst`
+    release builds under rustc 1.89, and decide whether preview is worth roughly an order of
+    magnitude increase in vendored crate count. Profiles (4b) deliver most of the user-facing win
+    without any of this risk, which is why they come first.
+
+## Sequencing
+
+4a (20–22) first — small, independent, and each fixes something demonstrably wrong. Then 4b
+(23–25) as the next release's headline. 28 is cheap whenever, since the registry already holds
+the data. 26 matters most for anyone who isn't Cal (i.e. it's the difference between "my CV
+database" and "a CV app"). 31 stays parked until its packaging question has a real answer.
+
+---
+
+## Phase 4 outcome
+
+Items 20–30 are implemented, tested, and verified in a running app. Notes on what changed
+against the plan as written, and what's left:
+
+**Corrections found while building, not while planning:**
+
+- **`include` is a Typst keyword.** `cv-profile`'s section rules bind `let included = …`, not
+  `let include = …`. This wasn't a cosmetic problem: the invalid binding made the *whole* of
+  `cv-helpers.typ` fail to parse, which took the pre-existing
+  `compile_cv_entry_and_section_with_skrizhal_helpers` test down with it. Caught only because
+  that test existed. The YAML field is still named `include`.
+- **`cv-section` had to learn to skip reserved keys.** It iterated `data.keys()` directly, so
+  the moment `_profiles` appeared in the data file it would hand a profile block to the entry
+  renderer. Fixed with `cv-entry-keys`, and the profile compile test asserts a bare
+  `#cv-section()` still works alongside a `_profiles` block.
+- **`order` has no form field, so `read_form` reports `None` for it.** `commit_edit` copies the
+  stored value across before comparing, or every autosave would silently strip an entry's manual
+  position. Raw-YAML edits set it explicitly and are exempt.
+- **Item 30 needed no new Rust dependency.** The plan assumed lifting Retseptura's git-backed
+  storage meant adding `git2` — which would have meant regenerating
+  `packaging/cargo-sources.json`, needing tooling not installed here. Retseptura doesn't use a
+  library at all: it shells out via `flatpak-spawn --host git` (org.gnome.Platform bundles no
+  git binary). Skrizhal now does the same, in `src/git_backup.rs`. The only packaging change is
+  one `--talk-name=org.freedesktop.Flatpak` line in the manifest.
+- **Autosave (item 21) turned out to constrain the sidebar.** Row Duplicate/Delete captured
+  their entry key at build time, but autosave renames entries as auto-generated keys follow
+  Title/Organization. They now read the key off the row at click time, via weak references —
+  a strong `row` inside a closure the row itself owns is a reference cycle.
+
+**Not done:**
+
+- **ORCID and LinkedIn import (part of item 26).** BibTeX is implemented, hand-rolled in
+  `core/src/import.rs` specifically to avoid a vendored dependency. ORCID needs network access
+  (Skrizhal's finish-args deliberately carry no `--share=network`) and LinkedIn's export is a
+  multi-file, unstable CSV bundle — both want their own design pass rather than being bolted on.
+- **Item 31, live Typst preview.** Still parked on the same question it was parked on: whether
+  the target `typst` release builds under the GNOME 50 runtime's rustc 1.89, and whether preview
+  justifies roughly an order-of-magnitude increase in vendored crates. Nothing learned while
+  building 4a–4c changes that calculus. Profiles delivered the user-facing win without it, as
+  predicted.

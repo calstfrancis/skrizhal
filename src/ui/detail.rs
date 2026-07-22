@@ -9,6 +9,11 @@ use sourceview5::prelude::*;
 use skrizhal_core::{slugify, unique_key, validate_entries, CvEntry, DateMode, Warning};
 
 type ExtraRow = (gtk4::ListBoxRow, gtk4::Entry, gtk4::Entry);
+/// One description bullet: its list row and the entry holding its text.
+pub type DescriptionRow = (gtk4::ListBoxRow, gtk4::Entry);
+/// Slot for the "a field changed" callback `app_window` installs to drive
+/// autosave. Optional because the form is built before that wiring exists.
+type DirtyHook = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
 #[derive(Clone)]
 pub struct DetailWidgets {
@@ -30,7 +35,8 @@ pub struct DetailWidgets {
     pub tags_warning: gtk4::Image,
     pub tags_suggest_popover: gtk4::Popover,
     pub tags_suggest_box: gtk4::Box,
-    pub description_view: gtk4::TextView,
+    pub description_list: gtk4::ListBox,
+    pub description_rows: Rc<RefCell<Vec<DescriptionRow>>>,
     pub extra_list: gtk4::ListBox,
     pub extra_rows: Rc<RefCell<Vec<ExtraRow>>>,
     pub raw_view: sourceview5::View,
@@ -45,6 +51,20 @@ pub struct DetailWidgets {
     /// `set_text` calls `regenerate_key_if_autogen` makes, so auto-updates
     /// don't look like a manual edit and turn themselves off.
     pub suppress_key_change: Rc<Cell<bool>>,
+    /// Fired whenever any field changes, so `app_window` can schedule an
+    /// autosave. Held in a cell because Additional Fields rows are created
+    /// dynamically — long after `build()` — and each needs to hook into the
+    /// same callback the fixed rows use.
+    pub on_dirty: DirtyHook,
+}
+
+impl DetailWidgets {
+    fn notify_dirty(on_dirty: &DirtyHook) {
+        let cb = on_dirty.borrow().clone();
+        if let Some(cb) = cb {
+            cb();
+        }
+    }
 }
 
 fn entry_row(title: &str) -> adw::EntryRow {
@@ -117,6 +137,7 @@ fn date_mode_from_index(idx: u32) -> DateMode {
 fn add_extra_row(
     extra_list: &gtk4::ListBox,
     rows: &Rc<RefCell<Vec<ExtraRow>>>,
+    on_dirty: &DirtyHook,
     key: &str,
     value: &str,
 ) {
@@ -150,8 +171,14 @@ fn add_extra_row(
     rows.borrow_mut()
         .push((row.clone(), key_entry.clone(), value_entry.clone()));
 
+    for entry in [&key_entry, &value_entry] {
+        let on_dirty = on_dirty.clone();
+        entry.connect_changed(move |_| DetailWidgets::notify_dirty(&on_dirty));
+    }
+
     let rows_for_remove = rows.clone();
     let extra_list_for_remove = extra_list.clone();
+    let on_dirty_for_remove = on_dirty.clone();
     remove_btn.connect_clicked(move |_| {
         let row_to_remove = {
             let rows = rows_for_remove.borrow();
@@ -162,8 +189,160 @@ fn add_extra_row(
         if let Some(row) = row_to_remove {
             extra_list_for_remove.remove(&row);
             rows_for_remove.borrow_mut().retain(|(r, _, _)| r != &row);
+            DetailWidgets::notify_dirty(&on_dirty_for_remove);
         }
     });
+}
+
+/// Adds an empty Additional Fields row for each field the category registry
+/// recommends but the entry doesn't have yet — so choosing "Education"
+/// immediately offers a `degree` row instead of leaving the user to know
+/// that's the expected field name.
+///
+/// The registry has driven validation warnings since it was written; this
+/// just puts the same knowledge in front of the user *before* they get
+/// warned about it. Rows stay empty until filled and are dropped on save.
+pub fn suggest_category_fields(widgets: &DetailWidgets, category: &str) {
+    let existing: Vec<String> = widgets
+        .extra_rows
+        .borrow()
+        .iter()
+        .map(|(_, k, _)| k.text().to_string().trim().to_string())
+        .collect();
+    for field in skrizhal_core::category_specific_fields(category) {
+        if skrizhal_core::COMMON_FIELDS.contains(field) || existing.iter().any(|e| e == field) {
+            continue;
+        }
+        add_extra_row(
+            &widgets.extra_list,
+            &widgets.extra_rows,
+            &widgets.on_dirty,
+            field,
+            "",
+        );
+    }
+}
+
+/// Appends one bullet row. Bullets are the highest-churn, highest-value
+/// content on a CV, so each gets its own row with reorder and remove
+/// controls plus a live character count — a single wrapped text blob made
+/// all three of those impossible.
+pub fn add_description_row(
+    list: &gtk4::ListBox,
+    rows: &Rc<RefCell<Vec<DescriptionRow>>>,
+    on_dirty: &DirtyHook,
+    text: &str,
+) -> gtk4::Entry {
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    hbox.set_margin_top(4);
+    hbox.set_margin_bottom(4);
+    hbox.set_margin_start(6);
+    hbox.set_margin_end(6);
+
+    let entry = gtk4::Entry::builder()
+        .placeholder_text("Accomplishment or responsibility")
+        .text(text)
+        .hexpand(true)
+        .build();
+    let count_label = gtk4::Label::builder()
+        .css_classes(["dim-label", "caption", "numeric"])
+        .width_chars(4)
+        .xalign(1.0)
+        .build();
+    let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
+    let down_btn = gtk4::Button::from_icon_name("go-down-symbolic");
+    let remove_btn = gtk4::Button::from_icon_name("list-remove-symbolic");
+    for (btn, tip) in [
+        (&up_btn, "Move Up"),
+        (&down_btn, "Move Down"),
+        (&remove_btn, "Remove Bullet"),
+    ] {
+        btn.add_css_class("flat");
+        btn.set_tooltip_text(Some(tip));
+        btn.set_valign(gtk4::Align::Center);
+    }
+
+    hbox.append(&entry);
+    hbox.append(&count_label);
+    hbox.append(&up_btn);
+    hbox.append(&down_btn);
+    hbox.append(&remove_btn);
+    list.append(&hbox);
+
+    let row = list
+        .last_child()
+        .and_downcast::<gtk4::ListBoxRow>()
+        .expect("ListBox wraps appended child in a ListBoxRow");
+    rows.borrow_mut().push((row.clone(), entry.clone()));
+
+    let update_count = {
+        let count_label = count_label.clone();
+        move |e: &gtk4::Entry| {
+            let n = e.text().chars().count();
+            count_label.set_label(&if n == 0 { String::new() } else { n.to_string() });
+        }
+    };
+    update_count(&entry);
+    {
+        let on_dirty = on_dirty.clone();
+        entry.connect_changed(move |e| {
+            update_count(e);
+            DetailWidgets::notify_dirty(&on_dirty);
+        });
+    }
+
+    // Reordering swaps the text rather than the widgets: the rows are already
+    // in the list in order, and moving GTK children around mid-signal is a
+    // reliable way to invalidate the very iteration that triggered it.
+    for (btn, delta) in [(&up_btn, -1i32), (&down_btn, 1i32)] {
+        let rows = rows.clone();
+        let entry = entry.clone();
+        let on_dirty = on_dirty.clone();
+        btn.connect_clicked(move |_| {
+            let rows_ref = rows.borrow();
+            let Some(index) = rows_ref.iter().position(|(_, e)| e == &entry) else {
+                return;
+            };
+            let target = index as i32 + delta;
+            if target < 0 || target as usize >= rows_ref.len() {
+                return;
+            }
+            let other = rows_ref[target as usize].1.clone();
+            let this_text = entry.text().to_string();
+            let other_text = other.text().to_string();
+            drop(rows_ref);
+            entry.set_text(&other_text);
+            other.set_text(&this_text);
+            other.grab_focus();
+            DetailWidgets::notify_dirty(&on_dirty);
+        });
+    }
+    {
+        let rows = rows.clone();
+        let list = list.clone();
+        let entry = entry.clone();
+        let on_dirty = on_dirty.clone();
+        remove_btn.connect_clicked(move |_| {
+            let target = rows
+                .borrow()
+                .iter()
+                .find(|(_, e)| e == &entry)
+                .map(|(r, _)| r.clone());
+            if let Some(row) = target {
+                list.remove(&row);
+                rows.borrow_mut().retain(|(r, _)| r != &row);
+                DetailWidgets::notify_dirty(&on_dirty);
+            }
+        });
+    }
+    entry
+}
+
+pub fn clear_description_rows(widgets: &DetailWidgets) {
+    while let Some(child) = widgets.description_list.first_child() {
+        widgets.description_list.remove(&child);
+    }
+    widgets.description_rows.borrow_mut().clear();
 }
 
 pub fn clear_extra_rows(widgets: &DetailWidgets) {
@@ -312,21 +491,23 @@ pub fn build() -> DetailWidgets {
     common_group.add(&tags_row);
     form_box.append(&common_group);
 
+    let desc_label_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     let desc_label = gtk4::Label::builder()
-        .label("Description (one bullet per line)")
+        .label("Description")
         .xalign(0.0)
+        .hexpand(true)
         .css_classes(["heading"])
         .build();
-    form_box.append(&desc_label);
-    let description_view = gtk4::TextView::builder()
-        .wrap_mode(gtk4::WrapMode::WordChar)
-        .top_margin(6)
-        .bottom_margin(6)
-        .left_margin(6)
-        .right_margin(6)
-        .build();
-    let desc_frame = gtk4::Frame::builder().child(&description_view).build();
-    form_box.append(&desc_frame);
+    let add_bullet_button = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_bullet_button.set_tooltip_text(Some("Add Bullet"));
+    desc_label_row.append(&desc_label);
+    desc_label_row.append(&add_bullet_button);
+    form_box.append(&desc_label_row);
+    let description_list = gtk4::ListBox::new();
+    description_list.set_selection_mode(gtk4::SelectionMode::None);
+    description_list.add_css_class("boxed-list");
+    form_box.append(&description_list);
+    let description_rows: Rc<RefCell<Vec<DescriptionRow>>> = Rc::new(RefCell::new(Vec::new()));
 
     let extra_label_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     let extra_label = gtk4::Label::builder()
@@ -397,11 +578,43 @@ pub fn build() -> DetailWidgets {
     });
 
     let extra_rows: Rc<RefCell<Vec<ExtraRow>>> = Rc::new(RefCell::new(Vec::new()));
+    let on_dirty: DirtyHook = Rc::new(RefCell::new(None));
     {
         let extra_list_clone = extra_list.clone();
         let rows_clone = extra_rows.clone();
+        let on_dirty = on_dirty.clone();
         add_field_button.connect_clicked(move |_| {
-            add_extra_row(&extra_list_clone, &rows_clone, "", "");
+            add_extra_row(&extra_list_clone, &rows_clone, &on_dirty, "", "");
+        });
+    }
+
+    // Every field that contributes to `read_form` reports edits, so autosave
+    // sees them. The raw-YAML view is deliberately excluded — it only ever
+    // commits via an explicit Save.
+    for row in [
+        &key_row,
+        &category_row,
+        &title_row,
+        &org_row,
+        &location_row,
+        &start_date_row,
+        &end_date_row,
+        &tags_row,
+    ] {
+        let on_dirty = on_dirty.clone();
+        row.connect_changed(move |_| DetailWidgets::notify_dirty(&on_dirty));
+    }
+    {
+        let on_dirty = on_dirty.clone();
+        date_mode_dropdown.connect_selected_notify(move |_| DetailWidgets::notify_dirty(&on_dirty));
+    }
+    {
+        let description_list = description_list.clone();
+        let description_rows = description_rows.clone();
+        let on_dirty = on_dirty.clone();
+        add_bullet_button.connect_clicked(move |_| {
+            let entry = add_description_row(&description_list, &description_rows, &on_dirty, "");
+            entry.grab_focus();
         });
     }
 
@@ -424,7 +637,8 @@ pub fn build() -> DetailWidgets {
         tags_warning,
         tags_suggest_popover,
         tags_suggest_box,
-        description_view,
+        description_list,
+        description_rows,
         extra_list,
         extra_rows,
         raw_view,
@@ -433,6 +647,7 @@ pub fn build() -> DetailWidgets {
         empty_add_button,
         key_autogen_active: Rc::new(Cell::new(false)),
         suppress_key_change: Rc::new(Cell::new(false)),
+        on_dirty,
     }
 }
 
@@ -474,7 +689,15 @@ pub fn load_entry(widgets: &DetailWidgets, entry: &CvEntry, is_new: bool) {
     widgets.end_date_row.set_visible(mode == DateMode::Range);
 
     widgets.tags_row.set_text(&entry.tags.join(", "));
-    set_text_of(&widgets.description_view, &entry.description.join("\n"));
+    clear_description_rows(widgets);
+    for bullet in &entry.description {
+        add_description_row(
+            &widgets.description_list,
+            &widgets.description_rows,
+            &widgets.on_dirty,
+            bullet,
+        );
+    }
 
     clear_extra_rows(widgets);
     for (k, v) in &entry.extra {
@@ -485,10 +708,18 @@ pub fn load_entry(widgets: &DetailWidgets, entry: &CvEntry, is_new: bool) {
                 .trim()
                 .to_string(),
         };
-        add_extra_row(&widgets.extra_list, &widgets.extra_rows, k, &value_str);
+        add_extra_row(
+            &widgets.extra_list,
+            &widgets.extra_rows,
+            &widgets.on_dirty,
+            k,
+            &value_str,
+        );
     }
 
-    let raw = skrizhal_core::to_yaml_string(std::slice::from_ref(entry), &Default::default())
+    suggest_category_fields(widgets, &entry.category);
+
+    let raw = skrizhal_core::to_yaml_string(std::slice::from_ref(entry), &Default::default(), &[])
         .unwrap_or_default();
     set_text_of(&widgets.raw_view, &raw);
 
@@ -557,22 +788,26 @@ pub fn read_form(widgets: &DetailWidgets) -> CvEntry {
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .collect();
-    let description: Vec<String> = text_of(&widgets.description_view)
-        .lines()
-        .map(|l| l.trim().to_string())
+    let description: Vec<String> = widgets
+        .description_rows
+        .borrow()
+        .iter()
+        .map(|(_, e)| e.text().trim().to_string())
         .filter(|l| !l.is_empty())
         .collect();
 
     let mut extra = std::collections::BTreeMap::new();
     for (_, key_entry, value_entry) in widgets.extra_rows.borrow().iter() {
         let key = key_entry.text().to_string();
-        if key.trim().is_empty() {
+        let value = value_entry.text().to_string();
+        // An empty value means the row is an unfilled prompt — either one the
+        // user added and hasn't typed into, or one `suggest_category_fields`
+        // conjured from the category registry. Writing those out would put an
+        // empty `degree:` on every Education entry.
+        if key.trim().is_empty() || value.trim().is_empty() {
             continue;
         }
-        extra.insert(
-            key.trim().to_string(),
-            serde_yaml_ng::Value::String(value_entry.text().to_string()),
-        );
+        extra.insert(key.trim().to_string(), serde_yaml_ng::Value::String(value));
     }
 
     let opt = |s: String| if s.trim().is_empty() { None } else { Some(s) };
@@ -591,6 +826,9 @@ pub fn read_form(widgets: &DetailWidgets) -> CvEntry {
         organization: opt(widgets.org_row.text().to_string()),
         location: opt(widgets.location_row.text().to_string()),
         date,
+        // Not exposed in the form yet — preserved from the loaded entry by
+        // the caller rather than being silently dropped on every save.
+        order: None,
         tags,
         description,
         extra,

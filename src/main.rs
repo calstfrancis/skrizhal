@@ -1,4 +1,5 @@
 mod config;
+mod git_backup;
 mod ui;
 
 use gtk4::prelude::*;

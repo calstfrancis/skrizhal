@@ -5,9 +5,69 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0-dev1] — Editing polish, tag filtering, and syntax-highlighted raw YAML
+## [0.4.0-dev2] — CV profiles, autosave, importing, history, and health checks
 
-### Added
+### Added — CV Profiles
+- **CV Profiles** — a named, ordered set of CV sections, each with a heading, category/tag
+  filters, and explicit include/exclude lists. This is the feature tags alone couldn't provide:
+  a filter has no ordering and no way to express the one-off exception ("drop that job from
+  *this* CV only") without inventing a single-use tag. Edited in a new "CV Profiles" dialog,
+  where each section shows a live count of how many entries currently match it, updating as the
+  rules are typed. Stored under a reserved `_profiles` key in the same `cv-elements.yaml`.
+- **`#cv-profile("name")` in Zerkalo** renders a whole profile — every section, in order, with
+  its heading — replacing a hand-assembled run of `#cv-section` calls. Needed no new plumbing:
+  it reads the same `skrizhal-cv-data` sys.input the entries already travel through.
+- **Optional `order` field** on an entry, pinning it to the top of its rendered section.
+  Opt-in — entries without it stay chronological, which is still the right default for most.
+
+### Added — everything else
+- **Autosave for the detail pane.** Field edits commit on their own — debounced ~600ms after
+  typing stops, and immediately on selecting another entry or closing the window. Previously
+  every other mutation (delete, duplicate, tag rename) wrote to disk instantly while form edits
+  needed an explicit Save, and navigating away discarded them silently. Undo is the safety net,
+  and coalesces an entire editing session on one entry into a single step. Save remains as an
+  explicit commit (now **Ctrl+S**) and is still the only thing that commits Raw YAML — debouncing
+  a parse of half-typed YAML would fail on nearly every keystroke.
+- **External-change detection.** A file monitor on the data file raises a banner when something
+  else modifies it, offering Reload. Zerkalo already re-read the CV data on every compile; this
+  closes the other direction, where a save here could silently clobber an edit made elsewhere.
+- **File History** — git-backed snapshots of the data file: browse past versions, snapshot on
+  demand, restore any of them (committing the current state first, so restoring can't lose
+  work), and an automatic snapshot on close. Offers to `git init` if the file isn't in a repo
+  yet. Shells out via `flatpak-spawn --host git`, the same approach Retseptura uses, so it
+  needs no new Rust dependency — only `--talk-name=org.freedesktop.Flatpak` in the manifest.
+- **Import from BibTeX** — publications and presentations from a `.bib` file, mapped onto the
+  right categories, with `journal`/`booktitle` folded into the registry's recommended `venue`
+  field. Always additive and always confirmed first, with imported keys made unique against
+  what's already there. Parser is hand-rolled in `skrizhal-core` to avoid a vendored dependency.
+- **Database Health** — file-level checks that per-entry validation structurally can't do:
+  near-duplicate entries, tags used exactly once that closely resemble a common one, untagged
+  entries, and unrecognized categories. Tag typos are the reason this exists — a mistyped tag
+  silently drops an entry from every CV that filters on the real one, with no error anywhere.
+- **Description bullets are now real rows** — add, remove, reorder, and a live character count
+  per bullet, instead of one text box split on newlines.
+- **Category-driven form fields.** Choosing a category offers that category's recommended
+  fields as ready-made rows (pick "Education", get a `degree` row). The registry has driven
+  validation warnings since it was written; this puts the same knowledge in front of the user
+  *before* they get warned. Unfilled rows are dropped on save rather than written out empty.
+- **Sort selector in the sidebar** (Newest First / Title / Category), persisted to config.
+- `skrizhal-core`: new `sort`, `profile`, `health`, and `import` modules.
+
+### Fixed
+- **The sidebar sorted alphabetically by title while the README documented it as most-recent-
+  first — and `core::sort_entries_by_date_desc`, written for exactly this, was never called by
+  the GUI at all.** Newest First is now the default; alphabetical remains available in the new
+  sort selector, since it's genuinely better for hunting an entry down by name.
+- **Zerkalo's `cv-section` would have rendered the `_profiles` block as if it were a CV entry**,
+  since it iterated every top-level key. It now skips reserved (`_`-prefixed) keys.
+- Sidebar row Duplicate/Delete read their entry key from the row at click time instead of
+  capturing it at build time — autosave can rename an entry (auto-generated keys follow
+  Title/Organization), which would have left those buttons pointing at a key that no longer
+  exists.
+- An unknown `_`-prefixed key in the data file is now preserved through a save instead of being
+  reported as a parse failure, so a file written by a newer Skrizhal survives an older one.
+
+### Also in this dev cycle
 - **Multi-select tag filter** — the sidebar's tag filter is now a checkbox popover instead of a
   single-choice dropdown, matching any of the selected tags (`core::FilterOptions.tags` replaces
   the old single `tag` field).

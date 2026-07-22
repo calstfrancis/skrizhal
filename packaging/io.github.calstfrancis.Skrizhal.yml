@@ -12,6 +12,10 @@ finish-args:
   - --socket=wayland
   - --device=dri
   - --filesystem=home
+  # File History shells out to git, which org.gnome.Platform doesn't bundle —
+  # src/git_backup.rs routes it through `flatpak-spawn --host git`, and that
+  # needs this. Same arrangement Retseptura uses for its git-backed storage.
+  - --talk-name=org.freedesktop.Flatpak
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin

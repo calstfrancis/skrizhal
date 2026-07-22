@@ -5,17 +5,25 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use skrizhal_core::CvEntry;
+use skrizhal_core::{CvEntry, SortMode};
 
 use super::changelog;
 use super::detail;
 use super::dialogs;
 use super::field_guide;
+use super::health;
+use super::history;
+use super::profiles;
 use super::sidebar;
 use super::state::{self, ChangeCallback, SharedState};
 use crate::config::Config;
 
 type RefreshViewCell = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
+/// How long typing pauses before an edit is committed. Long enough not to
+/// write on every keystroke, short enough that clicking away to another app
+/// (rather than to another row, which flushes immediately) can't lose work.
+const AUTOSAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(600);
 
 /// Selects the row whose widget name matches `key`, firing `row-selected` so
 /// the detail pane follows. Returns whether a matching row was found.
@@ -49,8 +57,13 @@ pub fn build(app: &adw::Application) {
     let config = Config::load();
     let (initial_state, load_error) = state::load_initial(config.data_path.clone());
     let state: SharedState = Rc::new(RefCell::new(initial_state));
+    state.borrow_mut().sort_mode = config.sort_mode;
 
     let sidebar_widgets = sidebar::build(&window);
+    // Set before the change handler is connected (further down, next to the
+    // other filter widgets) so restoring the saved mode isn't itself treated
+    // as a user change worth persisting.
+    sidebar_widgets.sort_dropdown.set_selected(config.sort_mode.index());
     let detail_widgets = detail::build();
     let toast_overlay = adw::ToastOverlay::new();
 
@@ -107,6 +120,22 @@ pub fn build(app: &adw::Application) {
     // row-selected handler that follows knows to enable key auto-generation
     // for that one selection instead of treating it like any other load.
     let next_selection_is_new: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+
+    // Autosave bookkeeping. `suppress_autosave` is held while the app itself
+    // is writing into the form (loading an entry, rebuilding the list) —
+    // without it, a programmatic `set_text` looks exactly like the user
+    // typing, and e.g. deleting an entry would immediately re-commit the
+    // stale form contents and resurrect it.
+    let suppress_autosave: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    // Bumped to invalidate an in-flight debounce — a pending commit that
+    // fires after an undo would otherwise write the old form back over it.
+    let autosave_generation: Rc<Cell<u64>> = Rc::new(Cell::new(0));
+    // Which entry the current undo snapshot covers, so a run of keystrokes
+    // costs one undo step rather than one per debounce tick.
+    let undo_pushed_for: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    // Threaded through a cell for the same reason `refresh_view_cell` is: the
+    // file monitor is built after `on_change`, which needs to call it.
+    let rearm_monitor_cell: RefreshViewCell = Rc::new(RefCell::new(None));
 
     // Focus Mode: the sidebar collapses via a Revealer (animated slide) rather
     // than an instant set_visible, so hiding it for distraction-free editing
@@ -225,15 +254,23 @@ pub fn build(app: &adw::Application) {
     let choose_file_btn = make_menu_item("Open…", Some("Ctrl+O"));
     let save_as_btn = make_menu_item("Save As…", Some("Ctrl+Shift+S"));
     let reload_btn = make_menu_item("Reload from Disk", None);
+    let import_btn = make_menu_item("Import from BibTeX…", None);
     let manage_tags_btn = make_menu_item("Manage Tags…", None);
+    let profiles_btn = make_menu_item("CV Profiles…", None);
+    let health_btn = make_menu_item("Database Health…", None);
+    let history_btn = make_menu_item("File History…", None);
     let preferences_btn = make_menu_item("Preferences…", None);
     let field_guide_btn = make_menu_item("Field Guide…", None);
     menu_box.append(&new_file_btn);
     menu_box.append(&choose_file_btn);
     menu_box.append(&save_as_btn);
     menu_box.append(&reload_btn);
+    menu_box.append(&import_btn);
     menu_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
     menu_box.append(&manage_tags_btn);
+    menu_box.append(&profiles_btn);
+    menu_box.append(&health_btn);
+    menu_box.append(&history_btn);
     menu_box.append(&preferences_btn);
     menu_box.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
     menu_box.append(&field_guide_btn);
@@ -259,8 +296,17 @@ pub fn build(app: &adw::Application) {
         .build();
     status_bar.append(&version_button);
 
+    // Banner, not a toast: an external change is an actionable one-off tied to
+    // file state, and it has to stay on screen until it's dealt with.
+    let external_change_banner = adw::Banner::builder()
+        .title("This file was changed by another program.")
+        .button_label("Reload")
+        .revealed(false)
+        .build();
+
     let toolbar_view = adw::ToolbarView::new();
     toolbar_view.add_top_bar(&header);
+    toolbar_view.add_top_bar(&external_change_banner);
     toolbar_view.set_content(Some(&toast_overlay));
     toolbar_view.add_bottom_bar(&status_bar);
     window.set_content(Some(&toolbar_view));
@@ -288,9 +334,23 @@ pub fn build(app: &adw::Application) {
         let undo_button = undo_button.clone();
         let redo_button = redo_button.clone();
         let refresh_view_cell = refresh_view_cell.clone();
+        let suppress_autosave = suppress_autosave.clone();
+        let autosave_generation = autosave_generation.clone();
+        let external_change_banner = external_change_banner.clone();
+        let rearm_monitor_cell = rearm_monitor_cell.clone();
         Rc::new(move |select_key: Option<String>| {
-            if let Err(err) = state::persist(&state) {
-                toast_overlay.add_toast(adw::Toast::new(&err));
+            let was_suppressed = suppress_autosave.replace(true);
+            autosave_generation.set(autosave_generation.get() + 1);
+            match state::persist(&state) {
+                // Our write is now the newest thing on disk, so any pending
+                // "changed elsewhere" warning has been answered — by us.
+                Ok(()) => external_change_banner.set_revealed(false),
+                Err(err) => toast_overlay.add_toast(adw::Toast::new(&err)),
+            }
+            // Open/New File/Save As all change `data_path` and then land here,
+            // so re-arming centrally covers every one of them.
+            if let Some(rearm) = rearm_monitor_cell.borrow().clone() {
+                rearm();
             }
             undo_button.set_sensitive(state::can_undo(&state));
             redo_button.set_sensitive(state::can_redo(&state));
@@ -315,9 +375,244 @@ pub fn build(app: &adw::Application) {
                 state.borrow_mut().selected_key = None;
                 detail::show_empty(&detail_widgets);
             }
+            suppress_autosave.set(was_suppressed);
         })
     };
     *on_change_cell.borrow_mut() = Some(on_change.clone());
+
+    // ── Autosave ─────────────────────────────────────────────────────
+    // Every other mutation in this window (delete, duplicate, tag rename)
+    // persisted immediately while detail-pane edits needed an explicit Save,
+    // and navigating to another row silently discarded them. Field edits now
+    // commit on a debounce and on selection change, with undo as the net.
+    //
+    // `explicit` distinguishes the Save button from a debounce tick: an
+    // explicit save reports failures as toasts and runs a full refresh (so
+    // filters and sort re-apply), while an autosave stays silent and patches
+    // the affected row in place, because rebuilding the list under a typing
+    // user would reload the form and eat the keystroke mid-word.
+    let commit_edit: Rc<dyn Fn(bool)> = Rc::new({
+        let state = state.clone();
+        let detail_widgets = detail_widgets.clone();
+        let sidebar_widgets = sidebar_widgets.clone();
+        let toast_overlay = toast_overlay.clone();
+        let on_change_cell = on_change_cell.clone();
+        let suppress_autosave = suppress_autosave.clone();
+        let undo_pushed_for = undo_pushed_for.clone();
+        let undo_button = undo_button.clone();
+        let redo_button = redo_button.clone();
+        let external_change_banner = external_change_banner.clone();
+        move |explicit: bool| {
+            if suppress_autosave.get() {
+                return;
+            }
+            let Some(original_key) = state.borrow().selected_key.clone() else {
+                return;
+            };
+            // Raw YAML commits only on an explicit Save — a debounce would be
+            // parsing half-typed YAML and failing on nearly every keystroke.
+            let raw = detail::is_raw_active(&detail_widgets);
+            if raw && !explicit {
+                return;
+            }
+            let result = if raw {
+                detail::read_raw(&detail_widgets)
+            } else {
+                Ok(detail::read_form(&detail_widgets))
+            };
+            let mut new_entry = match result {
+                Ok(e) => e,
+                Err(err) => {
+                    if explicit {
+                        toast_overlay.add_toast(adw::Toast::new(&err));
+                    }
+                    return;
+                }
+            };
+            new_entry.key = new_entry.key.trim().to_string();
+            if new_entry.key.is_empty() {
+                if explicit {
+                    toast_overlay.add_toast(adw::Toast::new("Key can't be empty."));
+                }
+                return;
+            }
+            let collides = state
+                .borrow()
+                .entries
+                .iter()
+                .any(|e| e.key == new_entry.key && e.key != original_key);
+            if collides {
+                if explicit {
+                    toast_overlay.add_toast(adw::Toast::new(&format!(
+                        "Key \"{}\" is already used by another entry.",
+                        new_entry.key
+                    )));
+                }
+                return;
+            }
+            let existing_idx = state
+                .borrow()
+                .entries
+                .iter()
+                .position(|e| e.key == original_key);
+            let Some(idx) = existing_idx else {
+                // Selection points at an entry that's gone (deleted, or undone
+                // out of existence). Committing here would resurrect it.
+                return;
+            };
+            // `order` has no form field, so `read_form` always reports None.
+            // Carry the stored value across, or every save would quietly strip
+            // an entry's manual position. (Raw YAML edits set it explicitly.)
+            if !raw {
+                new_entry.order = state.borrow().entries[idx].order;
+            }
+            if state.borrow().entries[idx] == new_entry {
+                return;
+            }
+            // One undo snapshot per entry per editing session — otherwise a
+            // sentence of typing would flush the whole 50-deep stack.
+            let already_snapshotted =
+                undo_pushed_for.borrow().as_deref() == Some(original_key.as_str());
+            if !already_snapshotted {
+                state::push_undo(&state);
+            }
+            {
+                let mut s = state.borrow_mut();
+                s.entries[idx] = new_entry.clone();
+                s.selected_key = Some(new_entry.key.clone());
+            }
+            // Follow the rename, so continuing to type doesn't start a second
+            // undo snapshot every time an auto-generated key shifts.
+            *undo_pushed_for.borrow_mut() = Some(new_entry.key.clone());
+
+            if explicit {
+                let cb = on_change_cell
+                    .borrow()
+                    .clone()
+                    .expect("on_change_cell set before first use");
+                cb(Some(new_entry.key));
+            } else {
+                match state::persist(&state) {
+                    Ok(()) => external_change_banner.set_revealed(false),
+                    Err(err) => toast_overlay.add_toast(adw::Toast::new(&err)),
+                }
+                sidebar::update_row_in_place(&sidebar_widgets, &original_key, &new_entry);
+                detail::update_warnings(&detail_widgets, &new_entry);
+                undo_button.set_sensitive(state::can_undo(&state));
+                redo_button.set_sensitive(state::can_redo(&state));
+            }
+        }
+    });
+
+    // Commits any pending edit right now, cancelling the in-flight debounce.
+    let flush_autosave: Rc<dyn Fn()> = Rc::new({
+        let commit_edit = commit_edit.clone();
+        let autosave_generation = autosave_generation.clone();
+        move || {
+            autosave_generation.set(autosave_generation.get() + 1);
+            commit_edit(false);
+        }
+    });
+
+    {
+        let commit_edit = commit_edit.clone();
+        let autosave_generation = autosave_generation.clone();
+        let suppress_autosave = suppress_autosave.clone();
+        let schedule: Rc<dyn Fn()> = Rc::new(move || {
+            if suppress_autosave.get() {
+                return;
+            }
+            let generation = autosave_generation.get() + 1;
+            autosave_generation.set(generation);
+            let commit_edit = commit_edit.clone();
+            let autosave_generation = autosave_generation.clone();
+            glib::timeout_add_local_once(AUTOSAVE_DEBOUNCE, move || {
+                if autosave_generation.get() == generation {
+                    commit_edit(false);
+                }
+            });
+        });
+        *detail_widgets.on_dirty.borrow_mut() = Some(schedule);
+    }
+
+    // ── External-change detection ────────────────────────────────────
+    // Zerkalo re-reads the CV data on every compile, but nothing told
+    // Skrizhal when the file moved underneath it — so a save here could
+    // silently clobber an edit made anywhere else.
+    let file_monitor: Rc<RefCell<Option<(std::path::PathBuf, gtk4::gio::FileMonitor)>>> =
+        Rc::new(RefCell::new(None));
+    let rearm_monitor: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let file_monitor = file_monitor.clone();
+        let banner = external_change_banner.clone();
+        move || {
+            let path = state.borrow().data_path.clone();
+            if file_monitor.borrow().as_ref().map(|(p, _)| p) == Some(&path) {
+                return;
+            }
+            let file = gtk4::gio::File::for_path(&path);
+            let monitor = match file.monitor_file(
+                gtk4::gio::FileMonitorFlags::WATCH_MOVES,
+                gtk4::gio::Cancellable::NONE,
+            ) {
+                Ok(m) => m,
+                // Not fatal: without a monitor the app simply behaves as it
+                // did before, with Reload From Disk as the manual fallback.
+                Err(_) => {
+                    *file_monitor.borrow_mut() = None;
+                    return;
+                }
+            };
+            {
+                let state = state.clone();
+                let banner = banner.clone();
+                monitor.connect_changed(move |_, _, _, _| {
+                    if state::changed_externally(&state) {
+                        banner.set_revealed(true);
+                    }
+                });
+            }
+            *file_monitor.borrow_mut() = Some((path, monitor));
+        }
+    });
+    rearm_monitor();
+    *rearm_monitor_cell.borrow_mut() = Some(rearm_monitor.clone());
+
+    {
+        let state = state.clone();
+        let toast_overlay = toast_overlay.clone();
+        let on_change_cell = on_change_cell.clone();
+        let banner = external_change_banner.clone();
+        external_change_banner.connect_button_clicked(move |_| {
+            banner.set_revealed(false);
+            match state::reload(&state) {
+                Ok(()) => {
+                    let cb = on_change_cell
+                        .borrow()
+                        .clone()
+                        .expect("on_change_cell set before first use");
+                    cb(None);
+                    toast_overlay.add_toast(adw::Toast::new("Reloaded from disk."));
+                }
+                Err(err) => {
+                    toast_overlay.add_toast(adw::Toast::new(&format!("Reload failed: {err}")));
+                }
+            }
+        });
+    }
+
+    // A half-typed entry shouldn't need the window to stay open to survive.
+    {
+        let flush_autosave = flush_autosave.clone();
+        let state_for_close = state.clone();
+        window.connect_close_request(move |_| {
+            flush_autosave();
+            // Order matters: the flush must land on disk before the snapshot,
+            // or the session's last edit misses the commit.
+            history::snapshot_on_close(&state_for_close);
+            glib::Propagation::Proceed
+        });
+    }
 
     // ── Undo/redo ────────────────────────────────────────────────────
     {
@@ -345,6 +640,7 @@ pub fn build(app: &adw::Application) {
         let choose_file_btn = choose_file_btn.clone();
         let save_as_btn = save_as_btn.clone();
         let search_entry = sidebar_widgets.search_entry.clone();
+        let save_button = detail_widgets.save_button.clone();
         let key_controller = gtk4::EventControllerKey::new();
         key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
         key_controller.connect_key_pressed(move |_, keyval, _, modifiers| {
@@ -374,6 +670,10 @@ pub fn build(app: &adw::Application) {
                 save_as_btn.emit_clicked();
                 return glib::Propagation::Stop;
             }
+            if ctrl && !shift && keyval == gtk4::gdk::Key::s {
+                save_button.emit_clicked();
+                return glib::Propagation::Stop;
+            }
             if ctrl && !shift && keyval == gtk4::gdk::Key::f {
                 search_entry.grab_focus();
                 return glib::Propagation::Stop;
@@ -388,12 +688,15 @@ pub fn build(app: &adw::Application) {
         let state = state.clone();
         let sidebar_widgets = sidebar_widgets.clone();
         let on_change_cell = on_change_cell.clone();
+        let suppress_autosave = suppress_autosave.clone();
         move || {
+            let was_suppressed = suppress_autosave.replace(true);
             {
                 let mut s = state.borrow_mut();
                 s.search = sidebar_widgets.search_entry.text().to_string();
                 s.filter_category = sidebar::current_filter_category(&sidebar_widgets);
                 s.filter_tags = sidebar::current_filter_tags(&sidebar_widgets);
+                s.sort_mode = SortMode::from_index(sidebar_widgets.sort_dropdown.selected());
             }
             let cb = on_change_cell
                 .borrow()
@@ -402,6 +705,7 @@ pub fn build(app: &adw::Application) {
             sidebar::refresh_list(&sidebar_widgets, &state, &cb);
             let selected = state.borrow().selected_key.clone();
             select_row_by_key(&sidebar_widgets.list_box, selected.as_deref());
+            suppress_autosave.set(was_suppressed);
         }
     });
     *refresh_view_cell.borrow_mut() = Some(refresh_view.clone());
@@ -417,13 +721,29 @@ pub fn build(app: &adw::Application) {
             .category_filter
             .connect_selected_notify(move |_| refresh_view());
     }
+    {
+        let refresh_view = refresh_view.clone();
+        sidebar_widgets.sort_dropdown.connect_selected_notify(move |dd| {
+            refresh_view();
+            let mut c = Config::load();
+            c.sort_mode = SortMode::from_index(dd.selected());
+            let _ = c.save();
+        });
+    }
 
     // ── Row selection drives the detail pane (single source of truth) ──
     {
         let state = state.clone();
         let detail_widgets = detail_widgets.clone();
         let next_selection_is_new = next_selection_is_new.clone();
+        let flush_autosave = flush_autosave.clone();
+        let suppress_autosave = suppress_autosave.clone();
+        let undo_pushed_for = undo_pushed_for.clone();
         sidebar_widgets.list_box.connect_row_selected(move |_, row| {
+            // Commit whatever the outgoing entry has in the form before the
+            // incoming one overwrites it. A no-op during list rebuilds, which
+            // hold the suppress guard.
+            flush_autosave();
             match row {
                 Some(row) => {
                     // Only a real (Some) selection consumes the flag — the
@@ -439,14 +759,21 @@ pub fn build(app: &adw::Application) {
                         .find(|e| e.key == key)
                         .cloned();
                     state.borrow_mut().selected_key = Some(key);
+                    // A fresh entry starts a fresh undo snapshot.
+                    *undo_pushed_for.borrow_mut() = None;
+                    // Populating the form is a programmatic write, not a user
+                    // edit — it must not schedule an autosave of its own.
+                    let was_suppressed = suppress_autosave.replace(true);
                     if let Some(entry) = entry {
                         detail::load_entry(&detail_widgets, &entry, is_new);
                     } else {
                         detail::show_empty(&detail_widgets);
                     }
+                    suppress_autosave.set(was_suppressed);
                 }
                 None => {
                     state.borrow_mut().selected_key = None;
+                    *undo_pushed_for.borrow_mut() = None;
                     detail::show_empty(&detail_widgets);
                 }
             }
@@ -474,6 +801,21 @@ pub fn build(app: &adw::Application) {
             let original = s.selected_key.clone();
             detail::regenerate_key_if_autogen(&detail_widgets, &s.entries, original.as_deref());
         });
+    }
+    // Changing the category offers that category's recommended fields right
+    // away, rather than waiting for a validation warning to mention them.
+    {
+        let detail_widgets = detail_widgets.clone();
+        let suppress_autosave = suppress_autosave.clone();
+        detail_widgets
+            .category_row
+            .clone()
+            .connect_changed(move |row| {
+                if suppress_autosave.get() {
+                    return;
+                }
+                detail::suggest_category_fields(&detail_widgets, &row.text());
+            });
     }
     {
         let state = state.clone();
@@ -530,59 +872,14 @@ pub fn build(app: &adw::Application) {
     }
 
     // ── Save button ──────────────────────────────────────────────────
+    // Autosave covers the form; Save stays as the explicit "commit now"
+    // affordance and is the only way the raw-YAML pane ever commits.
     {
-        let state = state.clone();
-        let detail_widgets = detail_widgets.clone();
-        let toast_overlay = toast_overlay.clone();
-        let on_change_cell = on_change_cell.clone();
-        detail_widgets.save_button.clone().connect_clicked(move |_| {
-            let result = if detail::is_raw_active(&detail_widgets) {
-                detail::read_raw(&detail_widgets)
-            } else {
-                Ok(detail::read_form(&detail_widgets))
-            };
-            let mut new_entry = match result {
-                Ok(e) => e,
-                Err(err) => {
-                    toast_overlay.add_toast(adw::Toast::new(&err));
-                    return;
-                }
-            };
-            new_entry.key = new_entry.key.trim().to_string();
-            if new_entry.key.is_empty() {
-                toast_overlay.add_toast(adw::Toast::new("Key can't be empty."));
-                return;
-            }
-
-            let original_key = state.borrow().selected_key.clone();
-            let collides = state.borrow().entries.iter().any(|e| {
-                e.key == new_entry.key && Some(&e.key) != original_key.as_ref()
-            });
-            if collides {
-                toast_overlay.add_toast(adw::Toast::new(&format!(
-                    "Key \"{}\" is already used by another entry.",
-                    new_entry.key
-                )));
-                return;
-            }
-
-            state::push_undo(&state);
-            {
-                let mut s = state.borrow_mut();
-                let existing_idx = original_key
-                    .as_ref()
-                    .and_then(|k| s.entries.iter().position(|e| &e.key == k));
-                match existing_idx {
-                    Some(idx) => s.entries[idx] = new_entry.clone(),
-                    None => s.entries.push(new_entry.clone()),
-                }
-            }
-            let cb = on_change_cell
-                .borrow()
-                .clone()
-                .expect("on_change_cell set before first use");
-            cb(Some(new_entry.key));
-        });
+        let commit_edit = commit_edit.clone();
+        detail_widgets
+            .save_button
+            .clone()
+            .connect_clicked(move |_| commit_edit(true));
     }
 
     // ── Header menu actions ──────────────────────────────────────────
@@ -598,6 +895,67 @@ pub fn build(app: &adw::Application) {
                 .clone()
                 .expect("on_change_cell set before first use");
             dialogs::show_manage_tags_dialog(&window, &state, &cb);
+        });
+    }
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let on_change_cell = on_change_cell.clone();
+        let popover = menu_popover.clone();
+        import_btn.connect_clicked(move |_| {
+            popover.popdown();
+            let cb = on_change_cell
+                .borrow()
+                .clone()
+                .expect("on_change_cell set before first use");
+            dialogs::import_bibtex(&window, &state, &cb);
+        });
+    }
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let popover = menu_popover.clone();
+        profiles_btn.connect_clicked(move |_| {
+            popover.popdown();
+            profiles::show(&window, &state);
+        });
+    }
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let on_change_cell = on_change_cell.clone();
+        let popover = menu_popover.clone();
+        history_btn.connect_clicked(move |_| {
+            popover.popdown();
+            let cb = on_change_cell
+                .borrow()
+                .clone()
+                .expect("on_change_cell set before first use");
+            history::show(&window, &state, &cb);
+        });
+    }
+    {
+        let window = window.clone();
+        let state = state.clone();
+        let popover = menu_popover.clone();
+        let sidebar_widgets = sidebar_widgets.clone();
+        let refresh_view = refresh_view.clone();
+        health_btn.connect_clicked(move |_| {
+            popover.popdown();
+            // Jumping to a flagged entry has to clear the filters first, or
+            // the row it wants to select may not be in the list at all.
+            let select_entry: Rc<dyn Fn(String)> = Rc::new({
+                let sidebar_widgets = sidebar_widgets.clone();
+                let refresh_view = refresh_view.clone();
+                move |key: String| {
+                    sidebar_widgets.search_entry.set_text("");
+                    sidebar_widgets.category_filter.set_selected(0);
+                    sidebar::clear_tag_filter_selection(&sidebar_widgets);
+                    refresh_view();
+                    select_row_by_key(&sidebar_widgets.list_box, Some(&key));
+                }
+            });
+            health::show(&window, &state, select_entry);
         });
     }
     {

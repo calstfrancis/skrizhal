@@ -3,6 +3,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::profile::{Profile, RawProfile, PROFILES_KEY};
+
 /// A YAML scalar or sequence — Hayagriva-style fields like `description` or
 /// `author` accept either shape (`description: foo` or `description: [a, b]`).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,6 +36,10 @@ struct RawEntry {
     location: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     date: Option<String>,
+    /// Optional manual sort override within a rendered CV section. Opt-in:
+    /// entries without it fall back to chronological order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    order: Option<i64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,6 +59,7 @@ pub struct CvEntry {
     pub organization: Option<String>,
     pub location: Option<String>,
     pub date: Option<String>,
+    pub order: Option<i64>,
     pub tags: Vec<String>,
     pub description: Vec<String>,
     pub extra: BTreeMap<String, serde_yaml_ng::Value>,
@@ -67,6 +74,7 @@ impl CvEntry {
             organization: raw.organization,
             location: raw.location,
             date: raw.date,
+            order: raw.order,
             tags: raw.tags,
             description: raw.description.map(OneOrMany::into_vec).unwrap_or_default(),
             extra: raw.extra,
@@ -85,6 +93,7 @@ impl CvEntry {
             organization: self.organization,
             location: self.location,
             date: self.date,
+            order: self.order,
             tags: self.tags,
             description,
             extra: self.extra,
@@ -178,6 +187,8 @@ pub struct ParseOutcome {
     /// through unchanged by `to_yaml_string`/`save_file` so a save never
     /// silently deletes an entry Skrizhal couldn't understand.
     pub raw_failed: BTreeMap<String, serde_yaml_ng::Value>,
+    /// CV profiles from the reserved `_profiles` key, if present.
+    pub profiles: Vec<Profile>,
 }
 
 /// Parses a `cv-elements.yaml`-shaped string. Only fails outright if the text
@@ -188,6 +199,29 @@ pub fn parse_str(yaml: &str) -> Result<ParseOutcome, LoadError> {
     let raw: BTreeMap<String, serde_yaml_ng::Value> = serde_yaml_ng::from_str(yaml)?;
     let mut outcome = ParseOutcome::default();
     for (key, value) in raw {
+        // Reserved (underscore-prefixed) keys are configuration, not entries.
+        // Unknown ones are deliberately passed through `raw_failed` without
+        // being reported as failures, so a file written by a newer Skrizhal
+        // survives a round-trip through an older one intact.
+        if key.starts_with('_') {
+            if key == PROFILES_KEY {
+                match serde_yaml_ng::from_value::<BTreeMap<String, RawProfile>>(value.clone()) {
+                    Ok(map) => {
+                        outcome.profiles = map
+                            .into_iter()
+                            .map(|(name, raw)| Profile::from_raw(name, raw))
+                            .collect();
+                    }
+                    Err(err) => {
+                        outcome.failed.push((key.clone(), err.to_string()));
+                        outcome.raw_failed.insert(key, value);
+                    }
+                }
+            } else {
+                outcome.raw_failed.insert(key, value);
+            }
+            continue;
+        }
         // Re-serialize each entry's Value back to YAML text and re-parse it
         // rather than using `from_value` directly: `from_value` is strict
         // about scalar types (an unquoted `date: 2020` is a YAML integer,
@@ -228,10 +262,21 @@ pub fn load_file(path: &Path) -> Result<ParseOutcome, LoadError> {
 pub fn to_yaml_string(
     entries: &[CvEntry],
     raw_failed: &BTreeMap<String, serde_yaml_ng::Value>,
+    profiles: &[Profile],
 ) -> Result<String, SaveError> {
     let mut raw: BTreeMap<String, serde_yaml_ng::Value> = raw_failed.clone();
     for e in entries.iter().cloned() {
         raw.insert(e.key.clone(), serde_yaml_ng::to_value(e.into_raw())?);
+    }
+    if profiles.is_empty() {
+        raw.remove(PROFILES_KEY);
+    } else {
+        let map: BTreeMap<String, RawProfile> = profiles
+            .iter()
+            .cloned()
+            .map(|p| (p.name.clone(), p.into_raw()))
+            .collect();
+        raw.insert(PROFILES_KEY.to_string(), serde_yaml_ng::to_value(map)?);
     }
     Ok(serde_yaml_ng::to_string(&raw)?)
 }
@@ -240,8 +285,9 @@ pub fn save_file(
     path: &Path,
     entries: &[CvEntry],
     raw_failed: &BTreeMap<String, serde_yaml_ng::Value>,
+    profiles: &[Profile],
 ) -> Result<(), SaveError> {
-    let content = to_yaml_string(entries, raw_failed)?;
+    let content = to_yaml_string(entries, raw_failed, profiles)?;
     std::fs::write(path, content).map_err(|source| SaveError::Io {
         path: path.display().to_string(),
         source,
@@ -382,7 +428,7 @@ bad-entry:
   organization: Missing category and title
 "#;
         let outcome = parse_str(yaml).unwrap();
-        let saved = to_yaml_string(&outcome.entries, &outcome.raw_failed).unwrap();
+        let saved = to_yaml_string(&outcome.entries, &outcome.raw_failed, &outcome.profiles).unwrap();
         let reparsed = parse_str(&saved).unwrap();
         assert_eq!(reparsed.entries.len(), 1);
         assert_eq!(reparsed.failed.len(), 1);
@@ -392,7 +438,7 @@ bad-entry:
     #[test]
     fn round_trip_preserves_fields() {
         let outcome = parse_str(SAMPLE).unwrap();
-        let yaml = to_yaml_string(&outcome.entries, &outcome.raw_failed).unwrap();
+        let yaml = to_yaml_string(&outcome.entries, &outcome.raw_failed, &outcome.profiles).unwrap();
         let reparsed = parse_str(&yaml).unwrap();
         assert_eq!(outcome.entries.len(), reparsed.entries.len());
         let orig = outcome.entries.iter().find(|e| e.key == "hope-united-2025").unwrap();
@@ -409,9 +455,81 @@ bad-entry:
         assert_eq!(outcome.entries.len(), 2);
 
         let out_path = dir.path().join("out.yaml");
-        save_file(&out_path, &outcome.entries, &outcome.raw_failed).unwrap();
+        save_file(&out_path, &outcome.entries, &outcome.raw_failed, &outcome.profiles).unwrap();
         let reloaded = load_file(&out_path).unwrap();
         assert_eq!(reloaded.entries.len(), 2);
+    }
+
+    #[test]
+    fn profiles_round_trip_through_save() {
+        let yaml = r#"
+some-job:
+  category: Employment
+  title: A Job
+_profiles:
+  academic:
+    label: Academic CV
+    sections:
+      - heading: Work
+        categories: [Employment]
+        exclude: [some-other-job]
+"#;
+        let outcome = parse_str(yaml).unwrap();
+        assert_eq!(outcome.entries.len(), 1);
+        assert!(outcome.failed.is_empty());
+        assert_eq!(outcome.profiles.len(), 1);
+        assert_eq!(outcome.profiles[0].name, "academic");
+        assert_eq!(outcome.profiles[0].label, "Academic CV");
+        assert_eq!(outcome.profiles[0].sections[0].heading, "Work");
+        assert_eq!(outcome.profiles[0].sections[0].exclude, vec!["some-other-job"]);
+
+        let saved = to_yaml_string(&outcome.entries, &outcome.raw_failed, &outcome.profiles).unwrap();
+        let reparsed = parse_str(&saved).unwrap();
+        assert_eq!(reparsed.profiles, outcome.profiles);
+        assert_eq!(reparsed.entries, outcome.entries);
+    }
+
+    /// A `_`-prefixed key this version doesn't know about must survive a
+    /// round-trip untouched, so a file written by a newer Skrizhal isn't
+    /// quietly stripped by an older one.
+    #[test]
+    fn unknown_reserved_key_is_preserved_and_not_reported_as_an_error() {
+        let yaml = r#"
+some-job:
+  category: Employment
+  title: A Job
+_something_from_the_future:
+  whatever: 42
+"#;
+        let outcome = parse_str(yaml).unwrap();
+        assert_eq!(outcome.entries.len(), 1);
+        assert!(outcome.failed.is_empty(), "reserved keys are not parse failures");
+
+        let saved = to_yaml_string(&outcome.entries, &outcome.raw_failed, &outcome.profiles).unwrap();
+        assert!(saved.contains("_something_from_the_future"));
+        assert!(saved.contains("whatever"));
+    }
+
+    #[test]
+    fn order_field_round_trips() {
+        let yaml = "a-job:\n  category: Employment\n  title: A Job\n  order: 2\n";
+        let outcome = parse_str(yaml).unwrap();
+        assert_eq!(outcome.entries[0].order, Some(2));
+        let saved = to_yaml_string(&outcome.entries, &outcome.raw_failed, &[]).unwrap();
+        assert!(saved.contains("order: 2"));
+        let reparsed = parse_str(&saved).unwrap();
+        assert_eq!(reparsed.entries[0].order, Some(2));
+    }
+
+    /// Removing the last profile must actually clear `_profiles` from the
+    /// file rather than leaving a stale copy behind.
+    #[test]
+    fn saving_with_no_profiles_drops_the_reserved_key() {
+        let yaml = "a-job:\n  category: Employment\n  title: A Job\n_profiles:\n  p:\n    sections: []\n";
+        let outcome = parse_str(yaml).unwrap();
+        assert_eq!(outcome.profiles.len(), 1);
+        let saved = to_yaml_string(&outcome.entries, &outcome.raw_failed, &[]).unwrap();
+        assert!(!saved.contains("_profiles"));
     }
 
     #[test]

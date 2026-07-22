@@ -66,6 +66,21 @@ pub const CATEGORY_REGISTRY: &[CategorySpec] = &[
     },
 ];
 
+/// Fields every entry has as a first-class struct field, rather than in the
+/// open `extra` map. Recommended fields outside this set are what a category
+/// actually adds — the ones a form has to conjure a row for.
+pub const COMMON_FIELDS: &[&str] = &["organization", "location", "date", "description", "tags"];
+
+/// The recommended fields for `category` that live in `extra` rather than
+/// being common to every entry (e.g. `degree` for Education, `venue` for
+/// Publication). Empty for an unknown category — there's nothing to suggest.
+pub fn category_specific_fields(category: &str) -> &'static [&'static str] {
+    match lookup(category) {
+        Some(spec) => spec.recommended_fields,
+        None => &[],
+    }
+}
+
 /// Case-insensitive lookup — the registry's own names are the canonical
 /// (Title Case) form, but a hand-typed category shouldn't fail to match
 /// just because of casing.
@@ -94,6 +109,22 @@ mod tests {
     #[test]
     fn lookup_unknown_category_returns_none() {
         assert!(lookup("Not A Real Category").is_none());
+    }
+
+    #[test]
+    fn category_specific_fields_excludes_common_ones() {
+        let fields = category_specific_fields("Education");
+        assert!(fields.contains(&"degree"));
+        // The caller filters COMMON_FIELDS out; the registry itself still
+        // lists them, since validation checks those too.
+        assert!(fields.contains(&"organization"));
+        assert!(COMMON_FIELDS.contains(&"organization"));
+        assert!(!COMMON_FIELDS.contains(&"degree"));
+    }
+
+    #[test]
+    fn category_specific_fields_for_unknown_category_is_empty() {
+        assert!(category_specific_fields("Not A Real Category").is_empty());
     }
 
     #[test]

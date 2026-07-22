@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use skrizhal_core::SortMode;
 
 /// Data lives in `~/.local/share/`, config in `~/.config/` — the shared
 /// convention across Cal's GTK4/libadwaita apps.
@@ -14,6 +15,8 @@ pub struct Config {
     /// Sidebar/detail split position, in pixels from the left edge.
     #[serde(default = "default_pane_position")]
     pub pane_position: i32,
+    #[serde(default)]
+    pub sort_mode: SortMode,
 }
 
 impl Default for Config {
@@ -22,6 +25,7 @@ impl Default for Config {
             data_path: default_data_path(),
             has_seen_field_guide: false,
             pane_position: default_pane_position(),
+            sort_mode: SortMode::default(),
         }
     }
 }

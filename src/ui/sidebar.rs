@@ -6,7 +6,7 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use skrizhal_core::{filter_entries, FilterOptions};
+use skrizhal_core::{filter_entries, sort_entries, FilterOptions, SortMode};
 
 use super::state::{ChangeCallback, SharedState};
 
@@ -18,6 +18,7 @@ pub struct SidebarWidgets {
     pub root: gtk4::Box,
     pub search_entry: gtk4::SearchEntry,
     pub category_filter: gtk4::DropDown,
+    pub sort_dropdown: gtk4::DropDown,
     pub tag_filter_button: gtk4::MenuButton,
     tag_filter_popover_box: gtk4::Box,
     selected_tags: Rc<RefCell<BTreeSet<String>>>,
@@ -64,6 +65,18 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
     filter_row.append(&tag_filter_button);
     root.append(&filter_row);
 
+    let sort_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    let sort_label = gtk4::Label::builder()
+        .label("Sort")
+        .css_classes(["dim-label", "caption"])
+        .build();
+    let sort_labels: Vec<&str> = SortMode::ALL.iter().map(|m| m.label()).collect();
+    let sort_dropdown = gtk4::DropDown::from_strings(&sort_labels);
+    sort_dropdown.set_hexpand(true);
+    sort_row.append(&sort_label);
+    sort_row.append(&sort_dropdown);
+    root.append(&sort_row);
+
     let add_button = gtk4::Button::builder()
         .icon_name("list-add-symbolic")
         .tooltip_text("Add Entry")
@@ -84,6 +97,7 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
         root,
         search_entry,
         category_filter,
+        sort_dropdown,
         tag_filter_button,
         tag_filter_popover_box,
         selected_tags: Rc::new(RefCell::new(BTreeSet::new())),
@@ -153,8 +167,65 @@ pub fn current_filter_category(widgets: &SidebarWidgets) -> Option<String> {
     selected_dropdown_text(&widgets.category_filter).filter(|s| s != ALL_CATEGORIES)
 }
 
+/// Clears every selected tag and resets the filter button's label — used
+/// when jumping to a specific entry that the active filters might hide.
+pub fn clear_tag_filter_selection(widgets: &SidebarWidgets) {
+    widgets.selected_tags.borrow_mut().clear();
+    let mut child = widgets.tag_filter_popover_box.first_child();
+    while let Some(widget) = child {
+        if let Some(check) = widget.downcast_ref::<gtk4::CheckButton>() {
+            check.set_active(false);
+        }
+        child = widget.next_sibling();
+    }
+    update_tag_filter_button_label(widgets);
+}
+
 pub fn current_filter_tags(widgets: &SidebarWidgets) -> Vec<String> {
     widgets.selected_tags.borrow().iter().cloned().collect()
+}
+
+fn row_title(entry: &skrizhal_core::CvEntry) -> String {
+    if entry.title.is_empty() {
+        entry.key.clone()
+    } else {
+        entry.title.clone()
+    }
+}
+
+fn row_subtitle(entry: &skrizhal_core::CvEntry) -> String {
+    [entry.organization.as_deref(), entry.date.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<&str>>()
+        .join(" · ")
+}
+
+/// Updates one row's text (and key, if it changed) without rebuilding the
+/// list — the autosave path, which must not disturb the row the user is
+/// currently typing into.
+///
+/// Deliberately does *not* re-filter or re-sort: an edit that pushes the
+/// entry out of the active filter, or past its neighbours in the sort order,
+/// leaves the row where it is until the next full refresh. Having a row
+/// vanish or jump mid-keystroke is worse than a momentarily stale position.
+pub fn update_row_in_place(
+    widgets: &SidebarWidgets,
+    old_key: &str,
+    entry: &skrizhal_core::CvEntry,
+) {
+    let mut child = widgets.list_box.first_child();
+    while let Some(widget) = child {
+        if widget.widget_name() == old_key {
+            if let Some(row) = widget.downcast_ref::<adw::ActionRow>() {
+                row.set_title(&row_title(entry));
+                row.set_subtitle(&row_subtitle(entry));
+                row.set_widget_name(&entry.key);
+            }
+            return;
+        }
+        child = widget.next_sibling();
+    }
 }
 
 /// Clears and repopulates the entry list from `state`, applying the current
@@ -165,6 +236,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
         widgets.list_box.remove(&child);
     }
 
+    let sort_mode = state.borrow().sort_mode;
     let mut matches: Vec<skrizhal_core::CvEntry> = {
         let s = state.borrow();
         let opts = FilterOptions {
@@ -178,20 +250,12 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
         };
         filter_entries(&s.entries, &opts).into_iter().cloned().collect()
     };
-    matches.sort_by_key(|e| e.title.to_lowercase());
+    sort_entries(&mut matches, sort_mode);
 
     for entry in &matches {
-        let subtitle_parts: Vec<&str> = [entry.organization.as_deref(), entry.date.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect();
         let row = adw::ActionRow::builder()
-            .title(if entry.title.is_empty() {
-                entry.key.clone()
-            } else {
-                entry.title.clone()
-            })
-            .subtitle(subtitle_parts.join(" · "))
+            .title(row_title(entry))
+            .subtitle(row_subtitle(entry))
             .activatable(true)
             .build();
         row.set_widget_name(&entry.key);
@@ -221,13 +285,20 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
             .tooltip_text("Delete")
             .build();
 
+        // Key is read off the row at click time rather than captured: autosave
+        // can rename an entry (auto-generated keys follow Title/Organization)
+        // and rewrite the row's widget name in place, which would leave a
+        // captured key pointing at an entry that no longer exists.
         {
             let state = state.clone();
-            let key = entry.key.clone();
             let popover = popover.clone();
             let on_change = on_change.clone();
-            duplicate_btn.connect_clicked(move |_| {
+            // Weak: the row owns this button, which owns this closure — a
+            // strong `row` here would be a reference cycle that outlives
+            // every list rebuild.
+            duplicate_btn.connect_clicked(glib::clone!(@weak row => move |_| {
                 popover.popdown();
+                let key = row.widget_name().to_string();
                 super::state::push_undo(&state);
                 let new_key = {
                     let mut s = state.borrow_mut();
@@ -240,16 +311,15 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
                     new_key
                 };
                 on_change(Some(new_key));
-            });
+            }));
         }
         {
             let state = state.clone();
-            let key = entry.key.clone();
-            let title = entry.title.clone();
             let on_change = on_change.clone();
             let window = widgets.window.clone();
-            delete_btn.connect_clicked(move |_| {
-                let label = if title.is_empty() { key.clone() } else { title.clone() };
+            delete_btn.connect_clicked(glib::clone!(@weak row => move |_| {
+                let key = row.widget_name().to_string();
+                let label = row.title().to_string();
                 let dialog = adw::MessageDialog::new(
                     Some(&window),
                     Some(&format!("Delete \"{label}\"?")),
@@ -278,7 +348,7 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
                     dialog.close();
                 });
                 dialog.present();
-            });
+            }));
         }
 
         row.add_suffix(&delete_btn);

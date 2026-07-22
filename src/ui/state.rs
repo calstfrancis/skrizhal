@@ -1,9 +1,10 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::SystemTime;
 
-use skrizhal_core::CvEntry;
+use skrizhal_core::{CvEntry, Profile, SortMode};
 
 pub struct AppState {
     pub entries: Vec<CvEntry>,
@@ -24,6 +25,14 @@ pub struct AppState {
     pub search: String,
     pub filter_category: Option<String>,
     pub filter_tags: Vec<String>,
+    pub sort_mode: SortMode,
+    /// CV profiles from the file's reserved `_profiles` key. Saved back
+    /// alongside the entries on every persist.
+    pub profiles: Vec<Profile>,
+    /// Modification time of `data_path` as of the last read or write Skrizhal
+    /// itself performed. The file monitor compares against it to tell an
+    /// external edit apart from the echo of our own save.
+    pub last_known_mtime: Option<SystemTime>,
     undo_stack: Vec<Vec<CvEntry>>,
     redo_stack: Vec<Vec<CvEntry>>,
 }
@@ -51,6 +60,9 @@ fn empty_state(data_path: PathBuf) -> AppState {
         search: String::new(),
         filter_category: None,
         filter_tags: Vec::new(),
+        sort_mode: SortMode::default(),
+        profiles: Vec::new(),
+        last_known_mtime: None,
         undo_stack: Vec::new(),
         redo_stack: Vec::new(),
     }
@@ -123,6 +135,18 @@ pub fn parse_warnings_summary(warnings: &[(String, String)]) -> Option<String> {
     ))
 }
 
+pub fn file_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
+}
+
+/// True if `data_path` has been modified by something other than Skrizhal
+/// since our last read or write.
+pub fn changed_externally(state: &SharedState) -> bool {
+    let s = state.borrow();
+    let on_disk = file_mtime(&s.data_path);
+    on_disk.is_some() && on_disk != s.last_known_mtime
+}
+
 pub fn load_initial(data_path: PathBuf) -> (AppState, Option<String>) {
     if !data_path.exists() {
         return (empty_state(data_path), None);
@@ -131,7 +155,9 @@ pub fn load_initial(data_path: PathBuf) -> (AppState, Option<String>) {
         Ok(outcome) => {
             let warning = parse_warnings_summary(&outcome.failed);
             let mut s = empty_state(data_path);
+            s.last_known_mtime = file_mtime(&s.data_path);
             s.entries = outcome.entries;
+            s.profiles = outcome.profiles;
             s.parse_warnings = outcome.failed;
             s.raw_failed = outcome.raw_failed;
             (s, warning)
@@ -156,6 +182,8 @@ pub fn reload(state: &SharedState) -> Result<(), String> {
         s.load_blocked = false;
         s.parse_warnings = Vec::new();
         s.raw_failed = BTreeMap::new();
+        s.profiles = Vec::new();
+        s.last_known_mtime = None;
         s.undo_stack.clear();
         s.redo_stack.clear();
         return Ok(());
@@ -164,9 +192,11 @@ pub fn reload(state: &SharedState) -> Result<(), String> {
         Ok(outcome) => {
             let mut s = state.borrow_mut();
             s.entries = outcome.entries;
+            s.profiles = outcome.profiles;
             s.load_blocked = false;
             s.parse_warnings = outcome.failed;
             s.raw_failed = outcome.raw_failed;
+            s.last_known_mtime = file_mtime(&path);
             s.undo_stack.clear();
             s.redo_stack.clear();
             Ok(())
@@ -180,7 +210,11 @@ pub fn reload(state: &SharedState) -> Result<(), String> {
 /// if a file already exists there, the next persist overwrites it.
 pub fn start_new_file(state: &SharedState, path: PathBuf) {
     let mut s = state.borrow_mut();
+    // Sort order is a view preference, not file content — a new file
+    // shouldn't silently snap the list back to the default ordering.
+    let sort_mode = s.sort_mode;
     *s = empty_state(path);
+    s.sort_mode = sort_mode;
 }
 
 /// Save As: keeps the current entries, points `data_path` at `path`. The
@@ -190,7 +224,7 @@ pub fn set_data_path(state: &SharedState, path: PathBuf) {
 }
 
 pub fn persist(state: &SharedState) -> Result<(), String> {
-    let s = state.borrow();
+    let mut s = state.borrow_mut();
     if s.load_blocked {
         return Err(
             "Not saving: the data file has a parse error. Fix it externally, then Reload."
@@ -200,5 +234,9 @@ pub fn persist(state: &SharedState) -> Result<(), String> {
     if let Some(dir) = s.data_path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    skrizhal_core::save_file(&s.data_path, &s.entries, &s.raw_failed).map_err(|e| e.to_string())
+    skrizhal_core::save_file(&s.data_path, &s.entries, &s.raw_failed, &s.profiles)
+        .map_err(|e| e.to_string())?;
+    // Recorded after the write so the monitor recognizes this change as ours.
+    s.last_known_mtime = file_mtime(&s.data_path);
+    Ok(())
 }

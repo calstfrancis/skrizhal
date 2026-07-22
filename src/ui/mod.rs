@@ -3,5 +3,8 @@ pub mod changelog;
 pub mod detail;
 pub mod dialogs;
 pub mod field_guide;
+pub mod health;
+pub mod history;
+pub mod profiles;
 pub mod sidebar;
 pub mod state;

@@ -230,3 +230,101 @@ pub fn show_preferences(window: &adw::ApplicationWindow, state: &SharedState, on
 
     dialog.present();
 }
+
+fn bibtex_filters() -> gio::ListStore {
+    let filter = gtk4::FileFilter::new();
+    filter.add_suffix("bib");
+    filter.add_suffix("bibtex");
+    filter.set_name(Some("BibTeX files"));
+    let filters = gio::ListStore::new::<gtk4::FileFilter>();
+    filters.append(&filter);
+    filters
+}
+
+/// Import publications from a `.bib` file. Always additive and always
+/// confirmed first: nothing existing is modified or replaced, imported keys
+/// are made unique against what's already there, and the user sees exactly
+/// what will be added before anything is written.
+pub fn import_bibtex(
+    window: &adw::ApplicationWindow,
+    state: &SharedState,
+    on_change: &ChangeCallback,
+) {
+    let file_dialog = gtk4::FileDialog::builder()
+        .title("Import from BibTeX")
+        .filters(&bibtex_filters())
+        .build();
+
+    let state = state.clone();
+    let on_change = on_change.clone();
+    let window = window.clone();
+    file_dialog.open(Some(&window.clone()), None::<&gio::Cancellable>, move |result| {
+        let Ok(file) = result else { return };
+        let Some(path) = file.path() else { return };
+
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(err) => {
+                let dialog = adw::MessageDialog::new(
+                    Some(&window),
+                    Some("Couldn't read that file"),
+                    Some(&err.to_string()),
+                );
+                dialog.add_response("ok", "OK");
+                dialog.present();
+                return;
+            }
+        };
+
+        let imported = skrizhal_core::parse_bibtex(&text, &state.borrow().entries);
+        if imported.is_empty() {
+            let dialog = adw::MessageDialog::new(
+                Some(&window),
+                Some("Nothing to import"),
+                Some("No BibTeX entries were found in that file."),
+            );
+            dialog.add_response("ok", "OK");
+            dialog.present();
+            return;
+        }
+
+        let preview: Vec<String> = imported
+            .iter()
+            .take(8)
+            .map(|e| format!("• {} ({})", e.title, e.category))
+            .collect();
+        let more = imported.len().saturating_sub(preview.len());
+        let mut body = preview.join("\n");
+        if more > 0 {
+            body.push_str(&format!("\n…and {more} more"));
+        }
+
+        let dialog = adw::MessageDialog::new(
+            Some(&window),
+            Some(&format!(
+                "Import {} {}?",
+                imported.len(),
+                if imported.len() == 1 { "entry" } else { "entries" }
+            )),
+            Some(&body),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("import", "Import");
+        dialog.set_response_appearance("import", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("import"));
+        dialog.set_close_response("cancel");
+
+        let state = state.clone();
+        let on_change = on_change.clone();
+        dialog.connect_response(None, move |dialog, response| {
+            if response == "import" {
+                super::state::push_undo(&state);
+                let first = imported.first().map(|e| e.key.clone());
+                state.borrow_mut().entries.extend(imported.iter().cloned());
+                on_change(first);
+            }
+            dialog.close();
+        });
+        dialog.present();
+    });
+}
