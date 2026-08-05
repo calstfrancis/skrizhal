@@ -7,6 +7,16 @@ on:
     branches: [ main ]
 
 jobs:
+  version-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version / metainfo consistency
+        run: ./check-versions.sh
+
+      - name: Check the shared stylesheet has not drifted
+        run: ./check-fond-style.sh
+
   build:
     runs-on: ubuntu-24.04
 

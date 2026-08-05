@@ -393,6 +393,7 @@ pub fn build() -> DetailWidgets {
         .vexpand(true)
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .build();
+    form_scroll.add_css_class("fond-ground");
     let form_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let common_group = adw::PreferencesGroup::builder().title("Entry").build();
@@ -556,6 +557,7 @@ pub fn build() -> DetailWidgets {
         .vexpand(true)
         .child(&raw_view)
         .build();
+    raw_scroll.add_css_class("fond-view");
     stack.add_named(&raw_scroll, Some("raw"));
 
     stack.set_visible_child_name("form");

@@ -199,6 +199,7 @@ pub fn build(app: &adw::Application) {
 
     // ── Header bar ───────────────────────────────────────────────────
     let header = adw::HeaderBar::new();
+    header.add_css_class("fond-chrome");
 
     let sidebar_toggle = gtk4::ToggleButton::builder()
         .icon_name("sidebar-show-symbolic")

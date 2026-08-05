@@ -9,6 +9,9 @@ const APP_ID: &str = "io.github.calstfrancis.Skrizhal";
 
 fn main() -> glib::ExitCode {
     let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(ui::app_window::build);
+    app.connect_activate(|app| {
+        ui::styles::load_global_css();
+        ui::app_window::build(app);
+    });
     app.run()
 }

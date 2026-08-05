@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0-dev2] — CV profiles, autosave, importing, history, and health checks
+## [0.4.0-dev3] — CV profiles, autosave, importing, history, health checks, and the suite interface
 
 ### Added — CV Profiles
 - **CV Profiles** — a named, ordered set of CV sections, each with a heading, category/tag
@@ -52,6 +52,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   *before* they get warned. Unfilled rows are dropped on save rather than written out empty.
 - **Sort selector in the sidebar** (Newest First / Title / Category), persisted to config.
 - `skrizhal-core`: new `sort`, `profile`, `health`, and `import` modules.
+
+### Changed — Interface
+- Skrizhal now uses the Fond suite's shared interface layer (`style/fond.css`, vendored from
+  fond-style), so it reads as the same application family as Zerkalo, Rubric and Iskra. It had no
+  stylesheet at all before this, which is why the sidebar and the detail pane were the same
+  undifferentiated white.
+- The entry list is one line per entry — title, and the date at the right edge — instead of a
+  two-line `AdwActionRow`. Two-line rows double the height of the list and bury the titles, which
+  are what the list is actually scanned for. The organization moved to the row's tooltip: at a
+  ~300px sidebar there is no room for a third column without ellipsizing the title down to a few
+  characters.
+- Rows read as one card group with rounded ends and hairline dividers, and the delete and "⋮"
+  buttons appear on hover rather than sitting in every row permanently.
 
 ### Fixed
 - **The sidebar sorted alphabetically by title while the README documented it as most-recent-

@@ -29,6 +29,7 @@ pub struct SidebarWidgets {
 
 pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    root.add_css_class("fond-sidebar");
     root.set_margin_top(6);
     root.set_margin_bottom(6);
     root.set_margin_start(6);
@@ -37,6 +38,7 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
     let search_entry = gtk4::SearchEntry::builder()
         .placeholder_text("Search title, organization, description…")
         .build();
+    search_entry.add_css_class("fond-search");
     root.append(&search_entry);
 
     let filter_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
@@ -89,7 +91,7 @@ pub fn build(window: &adw::ApplicationWindow) -> SidebarWidgets {
         .build();
     let list_box = gtk4::ListBox::new();
     list_box.set_selection_mode(gtk4::SelectionMode::Single);
-    list_box.add_css_class("boxed-list");
+    list_box.add_css_class("fond-list");
     scrolled.set_child(Some(&list_box));
     root.append(&scrolled);
 
@@ -193,12 +195,15 @@ fn row_title(entry: &skrizhal_core::CvEntry) -> String {
     }
 }
 
-fn row_subtitle(entry: &skrizhal_core::CvEntry) -> String {
-    [entry.organization.as_deref(), entry.date.as_deref()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<&str>>()
-        .join(" · ")
+fn row_tooltip(entry: &skrizhal_core::CvEntry) -> String {
+    match entry.organization.as_deref() {
+        Some(org) if !org.is_empty() => format!("{}\n{org}", row_title(entry)),
+        _ => row_title(entry),
+    }
+}
+
+fn row_meta(entry: &skrizhal_core::CvEntry) -> String {
+    entry.date.clone().unwrap_or_default()
 }
 
 /// Updates one row's text (and key, if it changed) without rebuilding the
@@ -217,9 +222,24 @@ pub fn update_row_in_place(
     let mut child = widgets.list_box.first_child();
     while let Some(widget) = child {
         if widget.widget_name() == old_key {
-            if let Some(row) = widget.downcast_ref::<adw::ActionRow>() {
-                row.set_title(&row_title(entry));
-                row.set_subtitle(&row_subtitle(entry));
+            // The row's three labels are found by widget name rather than by
+            // position, so reordering the row box can't silently retarget
+            // this to the wrong label.
+            if let Some(row) = widget.downcast_ref::<gtk4::ListBoxRow>() {
+                if let Some(row_box) = row.child() {
+                    let mut label = row_box.first_child();
+                    while let Some(w) = label {
+                        if let Some(l) = w.downcast_ref::<gtk4::Label>() {
+                            match l.widget_name().as_str() {
+                                "row-title" => l.set_text(&row_title(entry)),
+                                "row-meta" => l.set_text(&row_meta(entry)),
+                                _ => {}
+                            }
+                        }
+                        label = w.next_sibling();
+                    }
+                }
+                row.set_tooltip_text(Some(&row_tooltip(entry)));
                 row.set_widget_name(&entry.key);
             }
             return;
@@ -253,12 +273,42 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
     sort_entries(&mut matches, sort_mode);
 
     for entry in &matches {
-        let row = adw::ActionRow::builder()
-            .title(row_title(entry))
-            .subtitle(row_subtitle(entry))
-            .activatable(true)
-            .build();
+        // One line per entry: the title, the organization as dim reference
+        // text, and the date at the right edge. An AdwActionRow's title +
+        // subtitle is two lines, which doubles the height of the list and
+        // buries the titles — the thing the list is actually scanned for.
+        let row = gtk4::ListBoxRow::new();
+        row.set_activatable(true);
         row.set_widget_name(&entry.key);
+        row.add_css_class("fond-card");
+        row.add_css_class("fond-row");
+
+        let row_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        row_box.set_margin_start(10);
+        row_box.set_margin_end(10);
+
+        let title_label = gtk4::Label::new(Some(&row_title(entry)));
+        title_label.set_widget_name("row-title");
+        title_label.add_css_class("fond-row-title");
+        title_label.set_halign(gtk4::Align::Start);
+        title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        // The title takes the slack. Without this the two labels beside it
+        // claim their natural width first and the title — the thing the list
+        // is scanned for — ellipsizes down to a few characters.
+        title_label.set_hexpand(true);
+        row_box.append(&title_label);
+
+        // The organization is the row's tooltip rather than a third column.
+        // Zerkalo can afford dim reference text beside the title because its
+        // library window is wide; this sidebar is ~300px, and fitting title +
+        // organization + date on one line left the title — the thing actually
+        // being scanned — ellipsized to about six characters.
+        row.set_tooltip_text(Some(&row_tooltip(entry)));
+
+        let meta_label = gtk4::Label::new(Some(&row_meta(entry)));
+        meta_label.set_widget_name("row-meta");
+        meta_label.add_css_class("fond-row-meta");
+        row_box.append(&meta_label);
 
         let menu_button = gtk4::MenuButton::builder()
             .icon_name("view-more-symbolic")
@@ -319,7 +369,17 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
             let window = widgets.window.clone();
             delete_btn.connect_clicked(glib::clone!(@weak row => move |_| {
                 let key = row.widget_name().to_string();
-                let label = row.title().to_string();
+                // Looked up rather than read off the widget, for the same
+                // reason the key is: autosave can rename an entry underneath
+                // this row between build and click.
+                let label = {
+                    let s = state.borrow();
+                    s.entries
+                        .iter()
+                        .find(|e| e.key == key)
+                        .map(row_title)
+                        .unwrap_or_else(|| key.clone())
+                };
                 let dialog = adw::MessageDialog::new(
                     Some(&window),
                     Some(&format!("Delete \"{label}\"?")),
@@ -351,8 +411,21 @@ pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &C
             }));
         }
 
-        row.add_suffix(&delete_btn);
-        row.add_suffix(&menu_button);
+        // Destructive and secondary actions appear on hover rather than
+        // sitting permanently in every row.
+        delete_btn.add_css_class("fond-onhover");
+        menu_button.add_css_class("fond-onhover");
+        row_box.append(&delete_btn);
+        row_box.append(&menu_button);
+        row.set_child(Some(&row_box));
         widgets.list_box.append(&row);
+    }
+
+    // The group reads as one object: only its ends are rounded.
+    if let Some(first) = widgets.list_box.first_child() {
+        first.add_css_class("fond-card-first");
+    }
+    if let Some(last) = widgets.list_box.last_child() {
+        last.add_css_class("fond-card-last");
     }
 }

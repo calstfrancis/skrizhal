@@ -64,6 +64,7 @@ pub fn show(
 
     let toasts = adw::ToastOverlay::new();
     let header = adw::HeaderBar::new();
+    header.add_css_class("fond-chrome");
     let scrolled = gtk4::ScrolledWindow::builder()
         .vexpand(true)
         .hscrollbar_policy(gtk4::PolicyType::Never)

@@ -77,6 +77,7 @@ pub fn show(parent: &adw::ApplicationWindow, state: &SharedState) {
 
     let toasts = adw::ToastOverlay::new();
     let header = adw::HeaderBar::new();
+    header.add_css_class("fond-chrome");
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let selector_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);

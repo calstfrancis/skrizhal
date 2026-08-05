@@ -20,7 +20,11 @@ pub fn show_manage_tags_dialog(
         .build();
 
     let toolbar_view = adw::ToolbarView::new();
-    toolbar_view.add_top_bar(&adw::HeaderBar::new());
+    {
+        let header = adw::HeaderBar::new();
+        header.add_css_class("fond-chrome");
+        toolbar_view.add_top_bar(&header);
+    }
 
     let scrolled = gtk4::ScrolledWindow::builder().vexpand(true).build();
     let list_box = gtk4::ListBox::new();
