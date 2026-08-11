@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.4.0-dev3] — CV profiles, autosave, importing, history, health checks, and the suite interface
+## [0.4.0] "Living Ledger" — CV profiles, autosave, importing, history, health checks, and the suite interface
 
 ### Added — CV Profiles
 - **CV Profiles** — a named, ordered set of CV sections, each with a heading, category/tag
