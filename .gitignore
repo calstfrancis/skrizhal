@@ -3,3 +3,7 @@
 # Flatpak build artifacts
 /.flatpak-builder/
 /build-flatpak/
+
+# Developer notes / planning docs (local only, not for the public repo)
+CLAUDE.md
+plan.md
