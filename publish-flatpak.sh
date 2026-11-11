@@ -22,7 +22,8 @@
 set -euo pipefail
 
 GPG_KEY="A2918A9B43B199ADF9879F934AC9D5173DE4BC41"
-FLATPAK_REPO="/tmp/flatpak-checkout"
+# On the home drive: the flatpak repo is over 5 GB, more than /tmp (RAM-backed) holds.
+FLATPAK_REPO="${FLATPAK_CHECKOUT:-$HOME/.cache/fond-flatpak-checkout}"
 MANIFEST="packaging/io.github.calstfrancis.Skrizhal.yml"
 APP_LABEL="Skrizhal"
 
