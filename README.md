@@ -127,6 +127,10 @@ defaults to `clang`, but only `gcc` is installed; the config pins the linker to 
 To build the flatpak: `flatpak-builder` is run only by `dev-build.sh` / `publish-flatpak.sh`, not
 directly — see `packaging/io.github.calstfrancis.Skrizhal.yml`.
 
+## Porog status file
+
+Skrizhal writes `~/.local/share/fond/status/skrizhal.json` (the `fond-status` format from `fond-core`) with the number of entries in the open file. Porog, the Fond suite launcher, reads it for Skrizhal's row. The write is on `fond-status`'s own worker thread, never the GTK thread.
+
 ## License
 
 MIT

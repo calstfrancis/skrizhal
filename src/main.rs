@@ -13,5 +13,7 @@ fn main() -> glib::ExitCode {
         ui::styles::load_global_css();
         ui::app_window::build(app);
     });
+    // The Porog status line is written on a worker thread; let it finish.
+    app.connect_shutdown(|_| fond_status::summary::flush());
     app.run()
 }

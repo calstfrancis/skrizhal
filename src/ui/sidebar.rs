@@ -251,7 +251,20 @@ pub fn update_row_in_place(
 /// Clears and repopulates the entry list from `state`, applying the current
 /// search/category/tag filters. Rows carry their entry's key as the widget
 /// name so selection handlers can look the entry back up.
+/// Hands the size of the open file to the Porog launcher's status file (`fond-status`),
+/// which that crate writes on its own worker thread and only when the line changes.
+/// A file that could not be parsed has no count worth showing.
+fn report_to_porog(state: &SharedState) {
+    let s = state.borrow();
+    let line = (!s.load_blocked).then(|| match s.entries.len() {
+        1 => "1 CV entry".to_string(),
+        n => format!("{n} CV entries"),
+    });
+    fond_status::summary::set("skrizhal", line, None);
+}
+
 pub fn refresh_list(widgets: &SidebarWidgets, state: &SharedState, on_change: &ChangeCallback) {
+    report_to_porog(state);
     while let Some(child) = widgets.list_box.first_child() {
         widgets.list_box.remove(&child);
     }

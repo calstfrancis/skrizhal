@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Porog can show the size of your CV file.** Skrizhal now keeps a small status file, `~/.local/share/fond/status/skrizhal.json`, holding a line such as "3 CV entries". Porog, the Fond suite launcher, reads it for Skrizhal's row. The number is as of the last time Skrizhal ran, and is left out when the data file could not be parsed. Nothing else reads the file, and deleting it is harmless.
+
 ## [0.4.0] "Living Ledger" — CV profiles, autosave, importing, history, health checks, and the suite interface
 
 ### Added — CV Profiles
