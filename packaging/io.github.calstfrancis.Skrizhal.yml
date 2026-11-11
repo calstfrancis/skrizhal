@@ -30,6 +30,10 @@ modules:
   - name: skrizhal-deps
     buildsystem: simple
     build-options:
+      # This module's target dir is deleted by the app module, so stripping it is wasted work, and
+      # the post-build strip fails on its read-only files ("Failed to chmod input file").
+      strip: false
+      no-debuginfo: true
       env:
         CARGO_HOME: /run/build/skrizhal-deps/cargo
         CARGO_NET_OFFLINE: 'true'
