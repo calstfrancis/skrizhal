@@ -47,6 +47,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.4.1" date="2026-11-11">
+      <description>
+        <p>0.4.1 "Quiet Ledger" — Skrizhal now keeps a one-line note of how many CV entries you have, so Porog, the new Fond suite launcher, can show it. Nothing changes in how Skrizhal works.</p>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-08-11">
       <description>
         <p>0.4.0 "Living Ledger" — CV Profiles, a named, ordered set of CV sections with filters and explicit include/exclude lists, rendered from Zerkalo with a single `#cv-profile("name")` call. Autosave for the detail pane, with Ctrl+S remaining for explicit saves and the only thing that commits Raw YAML. File History: git-backed snapshots of the data file with browse, restore, and automatic snapshots on close. Import from BibTeX. Database Health checks for near-duplicate entries, tag typos, untagged entries, and unrecognized categories. External-change detection with a reload banner. Description bullets as real rows, category-driven form fields, and a sort selector. Skrizhal now uses the Fond suite's shared interface layer, reading as the same application family as Zerkalo, Rubric, and Iskra.</p>

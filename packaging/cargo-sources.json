@@ -1,5 +1,11 @@
 [
     {
+        "type": "git",
+        "url": "https://github.com/calstfrancis/fond-core",
+        "commit": "28d95c1491bdda6e708c04ce2768f89374e62338",
+        "dest": "flatpak-cargo/git/fond-core-28d95c1"
+    },
+    {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/anyhow/anyhow-1.0.103.crate",
@@ -166,6 +172,24 @@
         "type": "inline",
         "contents": "{\"package\": \"38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f\", \"files\": {}}",
         "dest": "cargo/vendor/field-offset-0.3.6",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "shell",
+        "commands": [
+            "cp -r --reflink=auto \"flatpak-cargo/git/fond-core-28d95c1/crates/fond-status\" \"cargo/vendor/fond-status\""
+        ]
+    },
+    {
+        "type": "inline",
+        "contents": "[package]\nname = \"fond-status\"\nversion = \"0.1.0\"\ndescription = \"The small status file each Fond app writes for the Porog launcher \u2014 shared Fond crate\"\nlicense = \"MIT\"\nedition = \"2021\"\nrust-version = \"1.80\"\nauthors = [\"Cal St Francis <calstfrancis@gmail.com>\"]\nrepository = \"https://github.com/calstfrancis/fond-core\"\n\n[dependencies]\nserde_json = \"1\"\nthiserror = \"2\"\n\n[dependencies.serde]\nversion = \"1\"\nfeatures = [\"derive\"]\n",
+        "dest": "cargo/vendor/fond-status",
+        "dest-filename": "Cargo.toml"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": null, \"files\": {}}",
+        "dest": "cargo/vendor/fond-status",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -938,6 +962,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/serde_json/serde_json-1.0.154.crate",
+        "sha256": "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6",
+        "dest": "cargo/vendor/serde_json-1.0.154"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6\", \"files\": {}}",
+        "dest": "cargo/vendor/serde_json-1.0.154",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/serde_spanned/serde_spanned-0.6.9.crate",
         "sha256": "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3",
         "dest": "cargo/vendor/serde_spanned-0.6.9"
@@ -1417,8 +1454,21 @@
         "dest-filename": ".cargo-checksum.json"
     },
     {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/zmij/zmij-1.0.23.crate",
+        "sha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b",
+        "dest": "cargo/vendor/zmij-1.0.23"
+    },
+    {
         "type": "inline",
-        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n",
+        "contents": "{\"package\": \"29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b\", \"files\": {}}",
+        "dest": "cargo/vendor/zmij-1.0.23",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "inline",
+        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/calstfrancis/fond-core\"]\ngit = \"https://github.com/calstfrancis/fond-core\"\nreplace-with = \"vendored-sources\"\nrev = \"28d95c1491bdda6e708c04ce2768f89374e62338\"\n",
         "dest": "cargo",
         "dest-filename": "config"
     }
