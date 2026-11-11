@@ -88,9 +88,13 @@ modules:
       - mkdir -p cargo
       # The fond-core git source (fond-status) is tied to the rev in Cargo.lock, read at build time so it cannot drift.
       - printf '[source.vendored-sources]\ndirectory = "/app/skrizhal-cargo-vendor"\n\n[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source."https://github.com/calstfrancis/fond-core"]\ngit = "https://github.com/calstfrancis/fond-core"\nreplace-with = "vendored-sources"\nrev = "%s"\n' "$(grep -o 'fond-core?rev=[0-9a-f]*' Cargo.lock | head -1 | cut -d= -f2)" > cargo/config
-      - cargo --offline build --release --manifest-path Cargo.toml
-      - install -Dm755 /app/skrizhal-cargo-target/release/skrizhal /app/bin/skrizhal
+      # On a cache hit for skrizhal-deps its target dir arrives read-only, and cargo rewrites every
+      # fingerprint file even when nothing recompiles ("Read-only file system"). Build in a writable copy.
+      - cp -a /app/skrizhal-cargo-target ./writable-cargo-target
+      - CARGO_TARGET_DIR=./writable-cargo-target cargo --offline build --release --manifest-path Cargo.toml
+      - install -Dm755 ./writable-cargo-target/release/skrizhal /app/bin/skrizhal
       - strip /app/bin/skrizhal
+      - rm -rf ./writable-cargo-target
       # Clean up build artifacts before finalising the module state
       - rm -rf /app/skrizhal-cargo-vendor /app/skrizhal-cargo-target
       - install -Dm644 packaging/io.github.calstfrancis.Skrizhal.desktop /app/share/applications/io.github.calstfrancis.Skrizhal.desktop
