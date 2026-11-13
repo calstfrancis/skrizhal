@@ -94,6 +94,8 @@ modules:
       - CARGO_TARGET_DIR=./writable-cargo-target cargo --offline build --release --manifest-path Cargo.toml
       - install -Dm755 ./writable-cargo-target/release/skrizhal /app/bin/skrizhal
       - strip /app/bin/skrizhal
+      - printf '#!/bin/sh\nexec /app/bin/skrizhal --search-json "$@"\n' > skrizhal-search
+      - install -Dm755 skrizhal-search /app/bin/skrizhal-search
       - rm -rf ./writable-cargo-target
       # Clean up build artifacts before finalising the module state
       - rm -rf /app/skrizhal-cargo-vendor /app/skrizhal-cargo-target

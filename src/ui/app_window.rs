@@ -46,7 +46,7 @@ fn select_row_by_key(list_box: &gtk4::ListBox, key: Option<&str>) -> bool {
     false
 }
 
-pub fn build(app: &adw::Application) {
+pub fn build(app: &adw::Application) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("Skrizhal")
@@ -1067,11 +1067,31 @@ pub fn build(app: &adw::Application) {
     sidebar::refresh_list(&sidebar_widgets, &state, &on_change);
     detail::show_empty(&detail_widgets);
 
+    // `win.select-key` is how Porog's search hands over an entry: clear the filters, so the
+    // row is in the list, and select it.
+    {
+        let sidebar_widgets = sidebar_widgets.clone();
+        let refresh_view = refresh_view.clone();
+        let select = gtk4::gio::SimpleAction::new("select-key", Some(glib::VariantTy::STRING));
+        select.connect_activate(move |_, param| {
+            let Some(key) = param.and_then(|p| p.str().map(str::to_string)) else {
+                return;
+            };
+            sidebar_widgets.search_entry.set_text("");
+            sidebar_widgets.category_filter.set_selected(0);
+            sidebar::clear_tag_filter_selection(&sidebar_widgets);
+            refresh_view();
+            select_row_by_key(&sidebar_widgets.list_box, Some(&key));
+        });
+        window.add_action(&select);
+    }
+
     window.present();
 
     if !config.has_seen_field_guide {
         field_guide::show(&window, true);
     }
+    window
 }
 
 fn make_menu_item(label: &str, shortcut: Option<&str>) -> gtk4::Button {

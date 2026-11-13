@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Search from Porog.** `skrizhal --search-json WORDS` (flatpak command `skrizhal-search`) prints the CV entries that match as one line of JSON for the Porog launcher, and a `skrizhal:KEY` link opens that entry. A second launch now raises the open window instead of building another.
+
 ## [0.4.1] "Quiet Ledger" — 2026-11-11 — Porog support
 
 ### Added
