@@ -47,6 +47,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.5.0" date="2026-11-14">
+      <description>
+        <p>0.5.0 "Swift Scroll" — Porog's search now reaches Skrizhal: your CV entries show up in Ctrl+K, and a hit opens that entry. A second launch now raises the open window instead of building another.</p>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-11-11">
       <description>
         <p>0.4.1 "Quiet Ledger" — Skrizhal now keeps a one-line note of how many CV entries you have, so Porog, the new Fond suite launcher, can show it. Nothing changes in how Skrizhal works.</p>
