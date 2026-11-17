@@ -47,6 +47,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.6.0" date="2026-11-17">
+      <description>
+        <p>0.6.0 "Quiet Scroll" — Porog, the Fond suite launcher, can now show what is new in Skrizhal from the icon on its row. Nothing changes in Skrizhal itself.</p>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-11-14">
       <description>
         <p>0.5.0 "Swift Scroll" — Porog's search now reaches Skrizhal: your CV entries show up in Ctrl+K, and a hit opens that entry. A second launch now raises the open window instead of building another.</p>

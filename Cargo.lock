@@ -117,7 +117,7 @@ dependencies = [
 [[package]]
 name = "fond-status"
 version = "0.1.0"
-source = "git+https://github.com/calstfrancis/fond-core?rev=28d95c1491bdda6e708c04ce2768f89374e62338#28d95c1491bdda6e708c04ce2768f89374e62338"
+source = "git+https://github.com/calstfrancis/fond-core?rev=3364c34cb1f0bec978596270a753abb0e91ea398#3364c34cb1f0bec978596270a753abb0e91ea398"
 dependencies = [
  "serde",
  "serde_json",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "skrizhal"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "fond-status",
  "glib",
