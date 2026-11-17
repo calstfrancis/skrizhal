@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **What's new, for Porog.** `skrizhal --whats-new-json` (flatpak command `skrizhal-whats-new`) prints the newest release's name and what changed as one line of JSON; Porog shows it from the icon on this app's row. Needs the next `fond-status`.
+
 ## [0.5.0] "Swift Scroll" — 2026-11-14 — Search from Porog
 
 ### Added

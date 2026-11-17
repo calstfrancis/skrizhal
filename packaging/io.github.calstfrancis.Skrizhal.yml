@@ -96,6 +96,8 @@ modules:
       - strip /app/bin/skrizhal
       - printf '#!/bin/sh\nexec /app/bin/skrizhal --search-json "$@"\n' > skrizhal-search
       - install -Dm755 skrizhal-search /app/bin/skrizhal-search
+      - printf '#!/bin/sh\nexec /app/bin/skrizhal --whats-new-json "$@"\n' > skrizhal-whats-new
+      - install -Dm755 skrizhal-whats-new /app/bin/skrizhal-whats-new
       - rm -rf ./writable-cargo-target
       # Clean up build artifacts before finalising the module state
       - rm -rf /app/skrizhal-cargo-vendor /app/skrizhal-cargo-target

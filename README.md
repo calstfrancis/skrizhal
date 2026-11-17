@@ -131,6 +131,8 @@ directly — see `packaging/io.github.calstfrancis.Skrizhal.yml`.
 
 Skrizhal writes `~/.local/share/fond/status/skrizhal.json` (the `fond-status` format from `fond-core`) with the number of entries in the open file. Porog, the Fond suite launcher, reads it for Skrizhal's row. The write is on `fond-status`'s own worker thread, never the GTK thread.
 
+`skrizhal --whats-new-json` (flatpak command `skrizhal-whats-new`) prints the newest release's name and changes as one line of JSON, for the What's New icon on Skrizhal's row in Porog.
+
 ## License
 
 MIT
